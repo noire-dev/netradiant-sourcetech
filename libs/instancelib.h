@@ -153,6 +153,7 @@ inline void InstanceSet_forEach( InstanceSet& instances, const Functor& functor 
 	}
 }
 
+
 template<typename Type>
 class InstanceEvaluateTransform
 {
@@ -170,6 +171,26 @@ static void apply( InstanceSet& instances ){
 	InstanceSet_forEach( instances, InstanceEvaluateTransform<Type>() );
 }
 typedef ReferenceCaller<InstanceSet, &InstanceSetEvaluateTransform<Type>::apply> Caller;
+};
+
+
+template<typename Type>
+class InstanceReEvaluateTransform
+{
+public:
+inline void operator()( scene::Instance& instance ) const {
+	InstanceTypeCast<Type>::cast( instance )->reEvaluateTransform();
+}
+};
+
+template<typename Type>
+class InstanceSetReEvaluateTransform
+{
+public:
+static void apply( InstanceSet& instances ){
+	InstanceSet_forEach( instances, InstanceReEvaluateTransform<Type>() );
+}
+typedef ReferenceCaller<InstanceSet, &InstanceSetReEvaluateTransform<Type>::apply> Caller;
 };
 
 #endif

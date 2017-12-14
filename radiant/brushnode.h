@@ -97,7 +97,7 @@ BrushDoom3& get( NullType<BrushDoom3>){
 
 BrushNode() :
 	m_node( this, this, StaticTypeCasts::instance().get() ),
-	m_brush( m_node, InstanceSetEvaluateTransform<BrushInstance>::Caller( m_instances ), InstanceSet::BoundsChangedCaller( m_instances ) ),
+	m_brush( m_node, InstanceSetEvaluateTransform<BrushInstance>::Caller( m_instances ), InstanceSetReEvaluateTransform<BrushInstance>::Caller( m_instances ), InstanceSet::BoundsChangedCaller( m_instances ) ),
 	m_mapImporter( m_brush ),
 	m_mapExporter( m_brush ),
 	m_xmlImporter( m_brush ),
@@ -108,7 +108,7 @@ BrushNode( const BrushNode& other ) :
 	scene::Instantiable( other ),
 	scene::Cloneable( other ),
 	m_node( this, this, StaticTypeCasts::instance().get() ),
-	m_brush( other.m_brush, m_node, InstanceSetEvaluateTransform<BrushInstance>::Caller( m_instances ), InstanceSet::BoundsChangedCaller( m_instances ) ),
+	m_brush( other.m_brush, m_node, InstanceSetEvaluateTransform<BrushInstance>::Caller( m_instances ), InstanceSetReEvaluateTransform<BrushInstance>::Caller( m_instances ), InstanceSet::BoundsChangedCaller( m_instances ) ),
 	m_mapImporter( m_brush ),
 	m_mapExporter( m_brush ),
 	m_xmlImporter( m_brush ),

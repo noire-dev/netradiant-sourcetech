@@ -1614,6 +1614,7 @@ AABB m_aabb_local;
 // ----
 
 Callback m_evaluateTransform;
+Callback m_reEvaluateTransform;
 Callback m_boundsChanged;
 
 mutable bool m_planeChanged;   // b-rep evaluation required
@@ -1632,7 +1633,7 @@ static Shader* m_state_point;
 static EBrushType m_type;
 static double m_maxWorldCoord;
 
-Brush( scene::Node& node, const Callback& evaluateTransform, const Callback& boundsChanged ) :
+Brush( scene::Node& node, const Callback& evaluateTransform, const Callback& reEvaluateTransform, const Callback& boundsChanged ) :
 	m_node( &node ),
 	m_undoable_observer( 0 ),
 	m_map( 0 ),
@@ -1640,12 +1641,13 @@ Brush( scene::Node& node, const Callback& evaluateTransform, const Callback& bou
 	m_render_vertices( m_uniqueVertexPoints, GL_POINTS ),
 	m_render_edges( m_uniqueEdgePoints, GL_POINTS ),
 	m_evaluateTransform( evaluateTransform ),
+	m_reEvaluateTransform( reEvaluateTransform ),
 	m_boundsChanged( boundsChanged ),
 	m_planeChanged( false ),
 	m_transformChanged( false ){
 	planeChanged();
 }
-Brush( const Brush& other, scene::Node& node, const Callback& evaluateTransform, const Callback& boundsChanged ) :
+Brush( const Brush& other, scene::Node& node, const Callback& evaluateTransform, const Callback& reEvaluateTransform, const Callback& boundsChanged ) :
 	m_node( &node ),
 	m_undoable_observer( 0 ),
 	m_map( 0 ),
@@ -1653,6 +1655,7 @@ Brush( const Brush& other, scene::Node& node, const Callback& evaluateTransform,
 	m_render_vertices( m_uniqueVertexPoints, GL_POINTS ),
 	m_render_edges( m_uniqueEdgePoints, GL_POINTS ),
 	m_evaluateTransform( evaluateTransform ),
+	m_reEvaluateTransform( reEvaluateTransform ),
 	m_boundsChanged( boundsChanged ),
 	m_planeChanged( false ),
 	m_transformChanged( false ){
@@ -1805,6 +1808,12 @@ void evaluateBRep() const {
 	if ( m_planeChanged ) {
 		m_planeChanged = false;
 		const_cast<Brush*>( this )->buildBRep();
+//		if( m_transformChanged ){
+			m_reEvaluateTransform();
+			if( !hasContributingFaces() )
+				const_cast<Brush*>( this )->buildBRep();
+			m_planeChanged = false;
+//		}
 	}
 }
 
@@ -3185,6 +3194,7 @@ static Shader* m_state_selpoint;
 const LightList* m_lightList;
 
 TransformModifier m_transform;
+Matrix4 m_transformValid;
 
 BrushInstance( const BrushInstance& other ); // NOT COPYABLE
 BrushInstance& operator=( const BrushInstance& other ); // NOT ASSIGNABLE
@@ -3207,7 +3217,8 @@ BrushInstance( const scene::Path& path, scene::Instance* parent, Brush& brush ) 
 	m_render_selected( GL_POINTS ),
 	m_render_faces_wireframe( m_faceCentroidPointsCulled, GL_POINTS ),
 	m_viewChanged( false ),
-	m_transform( Brush::TransformChangedCaller( m_brush ), ApplyTransformCaller( *this ) ){
+	m_transform( Brush::TransformChangedCaller( m_brush ), ApplyTransformCaller( *this ) ),
+	m_transformValid( g_matrix4_identity ){
 	m_brush.instanceAttach( Instance::path() );
 	m_brush.attach( *this );
 	m_counter->increment();
@@ -3667,6 +3678,30 @@ void evaluateTransform(){
 			g_brush_texturelock_enabled = false;
 		transformComponents( matrix );
 		g_brush_texturelock_enabled = tmp;
+	}
+}
+void reEvaluateTransform(){
+	Matrix4 matrix( m_transform.calculateTransform() );
+
+	if( m_brush.hasContributingFaces() ){
+//		globalOutputStream() << "hasContributingFaces\n";
+		m_transformValid = matrix;
+	}
+	else{
+//		globalOutputStream() << "!!!hasContributingFaces\n";
+		m_brush.revertTransform();
+		if ( m_transform.getType() == TRANSFORM_PRIMITIVE ) {
+			m_brush.transform( m_transformValid );
+		}
+		else
+		{
+			const bool tmp = g_brush_texturelock_enabled;
+			/* do not want texture projection transformation while resizing brush */
+			if( GlobalSelectionSystem().ManipulatorMode() == SelectionSystem::eDrag && GlobalSelectionSystem().Mode() == SelectionSystem::ePrimitive )
+				g_brush_texturelock_enabled = false;
+			transformComponents( m_transformValid );
+			g_brush_texturelock_enabled = tmp;
+		}
 	}
 }
 void applyTransform(){
