@@ -1276,15 +1276,16 @@ void camwnd_update_xor_rectangle( CamWnd& self, rect_t area ){
 			if ( Map_Valid( g_map ) && ScreenUpdates_Enabled() ) {
 				GlobalOpenGL_debugAssertNoErrors();
 
-				glDrawBuffer( GL_FRONT );
+//				glDrawBuffer( GL_FRONT );
 				self.fbo_get()->blit();
 
 				self.m_XORRectangle.set( area, self.getCamera().width, self.getCamera().height );
 
-				glDrawBuffer( GL_BACK );
+//				glDrawBuffer( GL_BACK );
 
 				GlobalOpenGL_debugAssertNoErrors();
-				glwidget_make_current( self.m_gl_widget );
+//				glwidget_make_current( self.m_gl_widget );
+				glwidget_swap_buffers( self.m_gl_widget );
 			}
 		}
 	}

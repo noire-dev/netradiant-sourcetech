@@ -486,7 +486,7 @@ bool XYWnd::XY_Draw_Overlay_start(){
 		if ( glwidget_make_current( m_gl_widget ) != FALSE ) {
 			if ( Map_Valid( g_map ) && ScreenUpdates_Enabled() ) {
 				GlobalOpenGL_debugAssertNoErrors();
-				glDrawBuffer( GL_FRONT );
+//				glDrawBuffer( GL_FRONT );
 				fbo_get()->blit();
 				return true;
 			}
@@ -495,9 +495,10 @@ bool XYWnd::XY_Draw_Overlay_start(){
 	return false;
 }
 void XYWnd::XY_Draw_Overlay_finish(){
-	glDrawBuffer( GL_BACK );
+//	glDrawBuffer( GL_BACK );
 	GlobalOpenGL_debugAssertNoErrors();
-	glwidget_make_current( m_gl_widget );
+//	glwidget_make_current( m_gl_widget );
+	glwidget_swap_buffers( GetWidget() );
 }
 
 void xy_update_xor_rectangle( XYWnd& self, rect_t area ){
@@ -1447,10 +1448,10 @@ void XYWnd::XY_DrawAxis( void ){
 }
 
 void XYWnd::RenderActive( void ){
-	if ( glwidget_make_current( m_gl_widget ) != FALSE ) {
+	if ( XY_Draw_Overlay_start() ) {
 		if ( Map_Valid( g_map ) && ScreenUpdates_Enabled() ) {
 			GlobalOpenGL_debugAssertNoErrors();
-			glDrawBuffer( GL_FRONT );
+//			glDrawBuffer( GL_FRONT );
 
 			if ( g_xywindow_globals_private.show_outline ) {
 				glMatrixMode( GL_PROJECTION );
@@ -1539,9 +1540,10 @@ void XYWnd::RenderActive( void ){
 				XYWnd::XY_DrawAxis();
 			}
 #endif
-			glDrawBuffer( GL_BACK );
+//			glDrawBuffer( GL_BACK );
 			GlobalOpenGL_debugAssertNoErrors();
-			glwidget_make_current( m_gl_widget );
+//			glwidget_make_current( m_gl_widget );
+			XY_Draw_Overlay_finish();
 		}
 	}
 }
