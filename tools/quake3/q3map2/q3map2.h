@@ -144,7 +144,7 @@ enum class EBrushType
 
 #define PORTALFILE              "PRT1"
 
-#define MAX_PORTALS             0x20000 /* same as MAX_MAP_PORTALS */
+#define MAX_PORTALS             0x20000*16 /* same as MAX_MAP_PORTALS */
 #define MAX_SEPERATORS          MAX_POINTS_ON_WINDING
 #define MAX_POINTS_ON_FIXED_WINDING 24  /* ydnar: increased this from 12 at the expense of more memory */
 #define MAX_PORTALS_ON_LEAF     1024
@@ -194,11 +194,11 @@ inline bool style_is_valid( int style ){ return LS_NORMAL <= style && style < LS
 /* MAX_MAP_FOGS is technically unlimited in engine, but drawsurf sorting code only has 5 bits for fogs */
 #define MAX_IBSP_FOGS           31          /* (2^5 - world fog) */
 #define MAX_RBSP_FOGS           30          /* (2^5 - world fog - goggles) */
-#define MAX_MAP_LEAFS           0x20000
-#define MAX_MAP_PORTALS         0x20000
-#define MAX_MAP_LIGHTING        0x800000
-#define MAX_MAP_LIGHTGRID       0x100000    //%	0x800000 /* ydnar: set to points, not bytes */
-#define MAX_MAP_VISCLUSTERS     0x4000 // <= MAX_MAP_LEAFS
+#define MAX_MAP_LEAFS           0x20000*16
+#define MAX_MAP_PORTALS         0x20000*16
+#define MAX_MAP_LIGHTING        0x800000*16
+#define MAX_MAP_LIGHTGRID       0x100000*16    //%	0x800000 /* ydnar: set to points, not bytes */
+#define MAX_MAP_VISCLUSTERS     0x4000*128 // <= MAX_MAP_LEAFS
 #define MAX_MAP_VISIBILITY      ( VIS_HEADER_SIZE + MAX_MAP_VISCLUSTERS * ( ( ( MAX_MAP_VISCLUSTERS + 63 ) & ~63 ) >> 3 ) )
 
 /* the editor uses these predefined yaw angles to orient entities up or down */
@@ -1824,7 +1824,7 @@ inline EBrushType g_brushType = EBrushType::Undefined;
 /* surface stuff */
 inline mapDrawSurface_t   *mapDrawSurfs;
 inline int numMapDrawSurfs;
-inline int max_map_draw_surfs = 0x20000;
+inline int max_map_draw_surfs = 0x200000;
 
 inline int numSurfacesByType[ static_cast<std::size_t>( ESurfaceType::Shader ) + 1 ];
 inline int numStripSurfaces;

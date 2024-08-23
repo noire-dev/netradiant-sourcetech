@@ -48,7 +48,7 @@ extern botlib_import_t botimport;
 #define ON_EPSILON		0.005
 //#define DEG2RAD( a ) (( a * M_PI ) / 180.0F)
 
-#define MAX_BSPENTITIES		2048
+#define MAX_BSPENTITIES		16384
 
 typedef struct rgb_s
 {

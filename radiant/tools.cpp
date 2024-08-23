@@ -431,7 +431,7 @@ void Tools_registerCommands(){
 	GlobalToggles_insert( "MouseTransform", FreeCaller<SkewMode>(), ToggleItem::AddCallbackCaller( g_skewmode_button ) );
 	GlobalToggles_insert( "MouseDrag", FreeCaller<DragMode>(), ToggleItem::AddCallbackCaller( g_dragmode_button ) );
 	GlobalToggles_insert( "MouseBuild", FreeCaller<BuildMode>(), ToggleItem::AddCallbackCaller( g_build_button ), QKeySequence( "B" ) );
-	GlobalToggles_insert( "MouseUV", FreeCaller<UVMode>(), ToggleItem::AddCallbackCaller( g_uv_button ), QKeySequence( "G" ) );
+	GlobalToggles_insert( "MouseUV", FreeCaller<UVMode>(), ToggleItem::AddCallbackCaller( g_uv_button ) );
 	GlobalCommands_insert( "MouseRotateOrScale", FreeCaller<ToggleRotateScaleModes>() );
 	GlobalCommands_insert( "MouseDragOrTransform", FreeCaller<ToggleDragSkewModes>(), QKeySequence( "Q" ) );
 

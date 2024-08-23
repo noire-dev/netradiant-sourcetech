@@ -60,7 +60,7 @@ extern aas_settings_t aassettings;
 
 //NOTE: all travel times are in hundreth of a second
 //maximum number of reachability links
-#define AAS_MAX_REACHABILITYSIZE			128000		//******	(was 65536		only for very complex maps		#Spakk#	)
+#define AAS_MAX_REACHABILITYSIZE			128000*8		//******	(was 65536		only for very complex maps		#Spakk#	)
 //number of areas reachability is calculated for each frame
 #define REACHABILITYAREASPERCYCLE			15
 //number of units reachability points are placed inside the areas

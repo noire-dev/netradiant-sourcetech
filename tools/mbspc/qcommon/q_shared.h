@@ -904,10 +904,10 @@ typedef enum {
 //
 // per-level limits
 //
-#define	MAX_CLIENTS			64		// absolute limit
+#define	MAX_CLIENTS			256		// absolute limit
 #define MAX_LOCATIONS		64
 
-#define	GENTITYNUM_BITS		10		// don't need to send any more
+#define	GENTITYNUM_BITS		14		// don't need to send any more
 #define	MAX_GENTITIES		(1<<GENTITYNUM_BITS)
 
 // entitynums are communicated with GENTITY_BITS, so any reserved
