@@ -160,7 +160,7 @@ void ToggleGridSnap(){
 }
 
 
-int g_maxGridCoordPower = 4;
+int g_maxGridCoordPower = 10;
 float g_maxGridCoord;
 float GetMaxGridCoord(){
 	return g_maxGridCoord;
@@ -169,14 +169,14 @@ float GetMaxGridCoord(){
 void Region_defaultMinMax();
 void maxGridCoordPowerImport( int value ){
 	g_maxGridCoordPower = value;
-	g_maxGridCoord = pow( 2.0, std::clamp( g_maxGridCoordPower, 0, 4 ) + 12 );
+	g_maxGridCoord = pow( 2.0, std::clamp( g_maxGridCoordPower, 0, 10 ) + 12 );
 	Region_defaultMinMax();
 	GridChangeNotify();
 }
 typedef FreeCaller1<int, maxGridCoordPowerImport> maxGridCoordPowerImportCaller;
 
 void maxGridCoordPowerExport( const IntImportCallback& importer ){
-	importer( std::clamp( g_maxGridCoordPower, 0, 4 ) );
+	importer( std::clamp( g_maxGridCoordPower, 0, 10 ) );
 }
 typedef FreeCaller1<const IntImportCallback&, maxGridCoordPowerExport> maxGridCoordPowerExportCaller;
 
