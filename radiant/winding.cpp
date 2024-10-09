@@ -34,7 +34,7 @@ void windingTestInfinity(){
 	static std::size_t windingTestInfinity_planeOuttaWorld = 0;
 	static std::size_t windingTestInfinity_OK = 0;
 	static std::size_t windingTestInfinity_FAIL = 0;
-	const double maxWorldCoord = 4194304;
+	const double maxWorldCoord = 1048576;
 	AABB world( g_vector3_identity, Vector3( maxWorldCoord, maxWorldCoord, maxWorldCoord ) );
 	Plane3 worldplanes[6];
 	aabb_planes( world, worldplanes );
