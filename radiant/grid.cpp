@@ -245,7 +245,7 @@ void Grid_constructPreferences( PreferencesPage& page ){
 	    StringArrayRange( g_gridnames )
 	);
 	{
-		const char* coords[] = { "4096", "8192", "16384", "32768", "65536" };
+		const char* coords[] = { "4096", "8192", "16384", "32768", "65536", "131072", "262144", "524288", "1048576", "2097152", "4194304" };
 
 		page.appendCombo(
 		    "Max grid coordinate",
