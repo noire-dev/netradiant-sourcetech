@@ -21,19 +21,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #define AAS_MAX_BBOXES						5
-#define AAS_MAX_VERTEXES					512000
-#define AAS_MAX_PLANES						65536
-#define AAS_MAX_EDGES						512000
-#define AAS_MAX_EDGEINDEXSIZE				512000
-#define AAS_MAX_FACES						512000
-#define AAS_MAX_FACEINDEXSIZE				512000
-#define AAS_MAX_AREAS						65536
-#define AAS_MAX_AREASETTINGS				65536
+#define AAS_MAX_VERTEXES					512000*8
+#define AAS_MAX_PLANES						65536*8
+#define AAS_MAX_EDGES						512000*8
+#define AAS_MAX_EDGEINDEXSIZE				512000*8
+#define AAS_MAX_FACES						512000*8
+#define AAS_MAX_FACEINDEXSIZE				512000*8
+#define AAS_MAX_AREAS						65536*8
+#define AAS_MAX_AREASETTINGS				65536*8
 #define AAS_MAX_REACHABILITYSIZE			128000*8
-#define AAS_MAX_NODES						256000
-#define AAS_MAX_PORTALS						65536
-#define AAS_MAX_PORTALINDEXSIZE				65536
-#define AAS_MAX_CLUSTERS					65536
+#define AAS_MAX_NODES						256000*8
+#define AAS_MAX_PORTALS						65536*8
+#define AAS_MAX_PORTALINDEXSIZE				65536*8
+#define AAS_MAX_CLUSTERS					65536*8
 
 #include "../botlib/be_aas.h"
 #include "../botlib/be_aas_def.h"
