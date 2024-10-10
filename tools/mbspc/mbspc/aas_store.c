@@ -689,7 +689,7 @@ qboolean AAS_GetPlane(vec3_t normal, vec_t dist, int *planenum)
 
 	if (aasworld.numplanes >= max_aas.max_planes-1)
 	{
-		//Error("AAS_MAX_PLANES = %d", max_aas.max_planes);
+		Error("AAS_MAX_PLANES = %d", max_aas.max_planes);
 	} //end if
 
 #ifdef STOREPLANESDOUBLE
