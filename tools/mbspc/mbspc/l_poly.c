@@ -27,7 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "l_log.h"
 #include "l_mem.h"
 
-#define	BOGUS_RANGE		65535
+#define	BOGUS_RANGE		524288
 
 extern int numthreads;
 
