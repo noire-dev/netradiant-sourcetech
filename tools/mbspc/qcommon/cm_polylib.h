@@ -37,7 +37,7 @@ typedef struct
 
 #define	CLIP_EPSILON	0.1f
 
-#define MAX_MAP_BOUNDS			1048576
+#define MAX_MAP_BOUNDS			65535
 
 // you can define on_epsilon in the makefile as tighter
 #ifndef	ON_EPSILON

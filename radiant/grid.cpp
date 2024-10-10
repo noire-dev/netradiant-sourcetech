@@ -160,7 +160,7 @@ void ToggleGridSnap(){
 }
 
 
-int g_maxGridCoordPower = 8;
+int g_maxGridCoordPower = 4;
 float g_maxGridCoord;
 float GetMaxGridCoord(){
 	return g_maxGridCoord;
@@ -169,14 +169,14 @@ float GetMaxGridCoord(){
 void Region_defaultMinMax();
 void maxGridCoordPowerImport( int value ){
 	g_maxGridCoordPower = value;
-	g_maxGridCoord = pow( 2.0, std::clamp( g_maxGridCoordPower, 0, 8 ) + 12 );
+	g_maxGridCoord = pow( 2.0, std::clamp( g_maxGridCoordPower, 0, 4 ) + 12 );
 	Region_defaultMinMax();
 	GridChangeNotify();
 }
 typedef FreeCaller1<int, maxGridCoordPowerImport> maxGridCoordPowerImportCaller;
 
 void maxGridCoordPowerExport( const IntImportCallback& importer ){
-	importer( std::clamp( g_maxGridCoordPower, 0, 8 ) );
+	importer( std::clamp( g_maxGridCoordPower, 0, 4 ) );
 }
 typedef FreeCaller1<const IntImportCallback&, maxGridCoordPowerExport> maxGridCoordPowerExportCaller;
 
@@ -245,7 +245,7 @@ void Grid_constructPreferences( PreferencesPage& page ){
 	    StringArrayRange( g_gridnames )
 	);
 	{
-		const char* coords[] = { "4096", "8192", "16384", "32768", "65536", "131072", "262144", "524288", "1048576" };
+		const char* coords[] = { "4096", "8192", "16384", "32768", "65536" };
 
 		page.appendCombo(
 		    "Max grid coordinate",

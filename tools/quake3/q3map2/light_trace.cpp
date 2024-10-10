@@ -37,10 +37,10 @@
 #define MAX_TRACE_DEPTH         32
 #define MIN_NODE_SIZE           32.0f
 
-#define GROW_TRACE_INFOS        262144*4       //%	4096
-#define GROW_TRACE_WINDINGS     524288*4       //%	32768
-#define GROW_TRACE_TRIANGLES    1048576*4      //%	32768
-#define GROW_TRACE_NODES        131072*4       //%	16384
+#define GROW_TRACE_INFOS        32768       //%	4096
+#define GROW_TRACE_WINDINGS     65536       //%	32768
+#define GROW_TRACE_TRIANGLES    131072      //%	32768
+#define GROW_TRACE_NODES        16384       //%	16384
 #define GROW_NODE_ITEMS         16          //%	256
 
 #define MAX_TW_VERTS            24 // vortex: increased from 12 to 24 for ability co compile some insane maps with large curve count
