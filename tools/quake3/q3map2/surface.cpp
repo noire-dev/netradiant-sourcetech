@@ -219,26 +219,6 @@ static mapDrawSurface_t *MakeSkyboxSurface( mapDrawSurface_t *src ){
 
 
 /*
-   IsTriangleDegenerate
-   returns true if all three points are colinear, backwards, or the triangle is just plain bogus
- */
-
-#define TINY_AREA   1.0f
-
-bool IsTriangleDegenerate( bspDrawVert_t *points, int a, int b, int c ){
-	/* calcuate the area of the triangle */
-	/* assume all very small or backwards triangles will cause problems */
-	if ( vector3_length( vector3_cross( points[ b ].xyz - points[ a ].xyz, points[ c ].xyz - points[ a ].xyz ) ) < TINY_AREA ) {
-		return true;
-	}
-
-	/* must be a good triangle */
-	return false;
-}
-
-
-
-/*
    ClearSurface() - ydnar
    clears a surface and frees any allocated memory
  */
@@ -800,8 +780,9 @@ mapDrawSurface_t *DrawSurfaceForSide( const entity_t& e, const brush_t& b, const
 		}
 
 		/* round the xyz to a given precision and translate by origin */
-		for ( size_t i = 0; i < 3; i++ )
-			dv->xyz[ i ] = SNAP_INT_TO_FLOAT * floor( dv->xyz[ i ] * SNAP_FLOAT_TO_INT + 0.5 );
+		if( g_brushSnap )
+			for ( size_t i = 0; i < 3; i++ )
+				dv->xyz[ i ] = SNAP_INT_TO_FLOAT * floor( dv->xyz[ i ] * SNAP_FLOAT_TO_INT + 0.5 );
 		vTranslated = dv->xyz + e.originbrush_origin;
 
 		/* ydnar: tek-fu celshading support for flat shaded shit */

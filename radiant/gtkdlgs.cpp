@@ -369,8 +369,7 @@ void DoAbout(){
 				}
 				{
 					auto button = buttons->addButton( "Changelog", QDialogButtonBox::ButtonRole::NoRole );
-					QObject::connect( button, &QPushButton::clicked, [](){ OpenURL( StringStream( AppPath_get(), "changelog.txt" ) ); } );
-					button->setEnabled( false );
+					QObject::connect( button, &QPushButton::clicked, [](){ OpenURL( StringStream( AppPath_get(), "docs/changelog-custom.txt" ) ); } );
 				}
 				{
 					auto button = buttons->addButton( "About Qt", QDialogButtonBox::ButtonRole::NoRole );
@@ -696,7 +695,8 @@ R"(
 		depthFunc equal
 	}
 	{
-		map %s
+		// same texture once more
+		map textures/
 		blendFunc GL_DST_COLOR GL_ZERO
 		rgbGen identity
 		depthFunc equal
@@ -731,6 +731,17 @@ R"(
 		blendFunc GL_DST_COLOR GL_ZERO
 		rgbGen identity
 	}
+}
+)"
+	},
+	{
+		"remap",
+R"(
+	// compile time parameter
+	surfaceparm slick
+	qer_editorimage textures/
+	// remap back to original shader
+	q3map_remapShader textures/
 }
 )"
 	},
@@ -1737,6 +1748,10 @@ public:
 		QObject::connect( m_completer, QOverload<const QString &>::of( &QCompleter::activated ), [this]( const QString& str ){ autoCompleteInsert( str ); } );
 
 		setLineWrapMode( QPlainTextEdit::LineWrapMode::NoWrap );
+		QFont font( "nonexistent" ); // dummy name is required
+		font.setStyleHint( QFont::Monospace );
+		setFont( font );
+		updateTabStopDistance();
 		new ShaderHighlighter( document() );
 
 		m_lineNumberArea = new LineNumberArea( this, MemberCaller1<QPlainTextEdit_Shader, QPaintEvent *, &QPlainTextEdit_Shader::lineNumberAreaPaintEvent>( *this ) );
@@ -1940,6 +1955,7 @@ protected:
 		if( e->modifiers() & Qt::ControlModifier ){
 			const float delta = e->angleDelta().y() / 120.f;
 			zoomInF( delta );
+			updateTabStopDistance();
 			return;
 		}
 		QPlainTextEdit::wheelEvent(e);
@@ -1980,6 +1996,9 @@ protected:
 		setViewportMargins( m_lineNumberArea->lineNumberAreaWidth(), 0, 0, 0 );
 	}
 private:
+	void updateTabStopDistance(){
+		setTabStopDistance( fontMetrics().horizontalAdvance( "MMMM" ) );
+	}
 	void texTree_construct(){
 		class LoadTexturesByTypeVisitor : public ImageModules::Visitor
 		{

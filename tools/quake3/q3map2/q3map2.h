@@ -1545,7 +1545,6 @@ void                        ClassifySurfaces( int numSurfs, mapDrawSurface_t *ds
 void                        ClassifyEntitySurfaces( const entity_t& e );
 void                        TidyEntitySurfaces( const entity_t& e );
 mapDrawSurface_t            *CloneSurface( mapDrawSurface_t *src, shaderInfo_t *si );
-bool                        IsTriangleDegenerate( bspDrawVert_t *points, int a, int b, int c );
 void                        ClearSurface( mapDrawSurface_t *ds );
 mapDrawSurface_t            *DrawSurfaceForSide( const entity_t& e, const brush_t& b, const side_t& s, const winding_t& w );
 mapDrawSurface_t            *DrawSurfaceForMesh( const entity_t& e, parseMesh_t *p, mesh_t *mesh );
@@ -1756,6 +1755,7 @@ inline int maxSurfaceVerts = 999;                       /* ydnar */
 inline int maxSurfaceIndexes = 6000;                    /* ydnar */
 inline float npDegrees;                                 /* ydnar: nonplanar degrees */
 inline int bevelSnap;                                   /* ydnar: bevel plane snap */
+inline bool g_brushSnap = true;
 inline bool flat;
 inline bool meta;
 inline bool patchMeta;
@@ -1768,6 +1768,7 @@ inline float clipDepthGlobal = 2.0f;
 inline int metaAdequateScore = -1;
 inline int metaGoodScore = -1;
 inline bool g_noob;
+inline int g_globalSurfaceFlags;
 inline String64 globalCelShader;
 inline bool keepLights;
 inline bool keepModels;
@@ -2116,26 +2117,6 @@ inline std::vector<bspDrawSurface_t> bspDrawSurfaces; // MAX_MAP_DRAW_SURFS
 inline std::vector<bspFog_t> bspFogs;
 
 inline std::vector<bspAdvertisement_t> bspAds;
-
-#define AUTOEXPAND_BY_REALLOC( ptr, reqitem, allocated, def ) \
-	do \
-	{ \
-		if ( reqitem >= allocated )	\
-		{ \
-			if ( allocated == 0 ) {	\
-				allocated = def; } \
-			while ( reqitem >= allocated && allocated )	\
-				allocated *= 2;	\
-			if ( !allocated || allocated > 2147483647 / (int)sizeof( *ptr ) ) \
-			{ \
-				Error( # ptr " over 2 GB" ); \
-			} \
-			ptr = void_ptr( realloc( ptr, sizeof( *ptr ) * allocated ) ); \
-			if ( !ptr ) { \
-				Error( # ptr " out of memory" ); } \
-		} \
-	} \
-	while ( 0 )
 
 #define AUTOEXPAND_BY_REALLOC_ADD( ptr, used, allocated, add ) \
 	do \
