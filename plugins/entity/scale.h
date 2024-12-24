@@ -52,26 +52,9 @@ inline void read_scalevec( Vector3& scale, const char* value ){
 	}
 }
 inline void write_scale( const Vector3& scale, Entity* entity ){
-	if ( scale[0] == 1 && scale[1] == 1 && scale[2] == 1 ) {
-		entity->setKeyValue( "modelscale", "" );
-		entity->setKeyValue( "modelscale_vec", "" );
-	}
-	else
-	{
-		char value[64];
-
-		if ( scale[0] == scale[1] && scale[0] == scale[2] ) {
-			sprintf( value, "%g", scale[0] );
-			entity->setKeyValue( "modelscale_vec", "" );
-			entity->setKeyValue( "modelscale", value );
-		}
-		else
-		{
-			sprintf( value, "%g %g %g", scale[0], scale[1], scale[2] );
-			entity->setKeyValue( "modelscale", "" );
-			entity->setKeyValue( "modelscale_vec", value );
-		}
-	}
+	char value[64];
+	printf( value, "%g %g %g", scale[0], scale[1], scale[2] );
+	entity->setKeyValue( "modelscale_vec", value );
 }
 
 inline Vector3 scale_scaled( const Vector3& scale, const Vector3& scaling ){
