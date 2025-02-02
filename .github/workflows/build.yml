@@ -50,7 +50,7 @@ jobs:
         path: Windows-${{ matrix.arch }}.zip
         if-no-files-found: error
 
-  linux:
+  linux-ubuntu:
     name: ${{ matrix.config }} Linux ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -79,9 +79,38 @@ jobs:
         path: Linux-${{ matrix.arch }}.7z
         if-no-files-found: error
 
+linux-fedora:
+    name: ${{ matrix.config }} Linux ${{ matrix.arch }}
+    runs-on: fedora-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64]
+
+    steps:
+    - name: Install tools
+      run: |
+          sudo dnf -qq update
+          sudo dnf -y install mesa-common-dev qtbase5-dev libjpeg8-dev libglib2.0-dev libpng-dev
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        make CXXFLAGS="-Wno-deprecated-copy" -j4
+        7z a Linux-${{ matrix.arch }}.7z ./install/*
+#       7z to preserve file permissions
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Linux-${{ matrix.arch }}
+        path: Linux-${{ matrix.arch }}.7z
+        if-no-files-found: error
+
   create-testing:
     if: github.ref == 'refs/heads/master' && ( github.event_name == 'push' || github.event_name == 'workflow_dispatch' )
-    needs: [windows-msys, linux]
+    needs: [windows-msys, linux-ubuntu, linux-fedora]
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
