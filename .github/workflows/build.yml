@@ -12,6 +12,10 @@ jobs:
         arch: [x86_64]
         cc: [gcc]
         include:
+          # - arch: x86
+          #   msystem: MINGW32
+          #   prefix: mingw-w64-i686
+
           - arch: x86_64
             msystem: MINGW64
             prefix: mingw-w64-x86_64
@@ -38,14 +42,15 @@ jobs:
         make MAKEFILE_CONF=msys2-Makefile.conf -j4
         mkdir -p install/settings
         7z a Windows-${{ matrix.arch }}.zip ./install/*
-    
+#       zip immediately, since .bla files and empty folders get lost somewhere later otherwise
+
     - uses: actions/upload-artifact@v4
       with:
         name: Windows-${{ matrix.arch }}
         path: Windows-${{ matrix.arch }}.zip
         if-no-files-found: error
 
-  linux-ubuntu:
+  linux:
     name: ${{ matrix.config }} Linux ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -66,6 +71,7 @@ jobs:
       run: |
         make CXXFLAGS="-Wno-deprecated-copy" -j4
         7z a Linux-${{ matrix.arch }}.7z ./install/*
+#       7z to preserve file permissions
 
     - uses: actions/upload-artifact@v4
       with:
@@ -73,46 +79,9 @@ jobs:
         path: Linux-${{ matrix.arch }}.7z
         if-no-files-found: error
 
-  linux-ubuntu-new:
-    name: ${{ matrix.config }} Linux ${{ matrix.arch }} 24.10
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64]
-
-    steps:
-    - name: Install Ubuntu 24.10
-      run: |
-        sudo apt-get update
-        sudo apt-get upgrade -y
-        # Настройка для разрешения обновлений до не-LTS версии
-        sudo sed -i 's/Prompt=lts/Prompt=normal/' /etc/update-manager/release-upgrades
-        sudo do-release-upgrade -f DistUpgradeViewNonInteractive
-        sudo apt-get update
-
-    - name: Install tools
-      run: |
-          sudo apt-get -qq update
-          sudo apt-get -y install mesa-common-dev qtbase5-dev libjpeg8-dev libglib2.0-dev libpng-dev
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - name: Build
-      run: |
-        make CXXFLAGS="-Wno-deprecated-copy" -j4
-        7z a Linux-${{ matrix.arch }}-24.10.7z ./install/*
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: Linux-${{ matrix.arch }}-24.10
-        path: Linux-${{ matrix.arch }}-24.10.7z
-        if-no-files-found: error
-
   create-testing:
     if: github.ref == 'refs/heads/master' && ( github.event_name == 'push' || github.event_name == 'workflow_dispatch' )
-    needs: [windows-msys, linux-ubuntu, linux-ubuntu-new]
+    needs: [windows-msys, linux]
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
@@ -123,7 +92,7 @@ jobs:
         run: |
           mv Windows-x86_64/Windows-x86_64.zip netradiant-custom-$(date +%Y%m%d)-windows-x86_64.zip
           mv Linux-x86_64/Linux-x86_64.7z netradiant-custom-$(date +%Y%m%d)-linux-x86_64.7z
-          mv Linux-x86_64/Linux-x86_64-24.10.7z netradiant-custom-$(date +%Y%m%d)-linux-x86_64-24.10.7z
+#         note: 7z dir/* doesn't match .bla (hidden) file in linux under dir/ but matches in subfolders  # or doesn't match there now too?
 
       - name: Get current date
         run: |

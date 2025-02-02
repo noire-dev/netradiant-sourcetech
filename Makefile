@@ -92,7 +92,7 @@ CPPFLAGS_JPEG      ?=
 LIBS_JPEG          ?= -ljpeg
 DEPEND_ON_MAKEFILE ?= yes
 # yes = download; all = even download undistributable gamepacks; no = disable; allinone = dl all-in-one compact fixed archive
-DOWNLOAD_GAMEPACKS ?= allinone
+DOWNLOAD_GAMEPACKS ?= no
 INSTALL_DLLS       ?= yes
 
 # Support CHECK_DEPENDENCIES with DOWNLOAD_GAMEPACKS semantics
