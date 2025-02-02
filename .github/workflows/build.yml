@@ -82,12 +82,14 @@ jobs:
         arch: [x86_64]
 
     steps:
-    - name: Install Ubuntu 24.10
-      run: |
-        sudo apt-get update
-        sudo apt-get upgrade -y
-        sudo do-release-upgrade -f DistUpgradeViewNonInteractive
-        sudo apt-get update
+  - name: Install Ubuntu 24.10
+    run: |
+      sudo apt-get update
+      sudo apt-get upgrade -y
+      # Настройка для разрешения обновлений до не-LTS версии
+      sudo sed -i 's/Prompt=lts/Prompt=normal/' /etc/update-manager/release-upgrades
+      sudo do-release-upgrade -f DistUpgradeViewNonInteractive
+      sudo apt-get update
 
     - name: Install tools
       run: |
