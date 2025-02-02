@@ -1,7 +1,3 @@
-name: build
-
-on: [workflow_dispatch]
-
 jobs:
   windows-msys:
     name: ${{ matrix.config }} Windows ${{ matrix.arch }}
@@ -12,10 +8,6 @@ jobs:
         arch: [x86_64]
         cc: [gcc]
         include:
-          # - arch: x86
-          #   msystem: MINGW32
-          #   prefix: mingw-w64-i686
-
           - arch: x86_64
             msystem: MINGW64
             prefix: mingw-w64-x86_64
@@ -42,8 +34,7 @@ jobs:
         make MAKEFILE_CONF=msys2-Makefile.conf -j4
         mkdir -p install/settings
         7z a Windows-${{ matrix.arch }}.zip ./install/*
-#       zip immediately, since .bla files and empty folders get lost somewhere later otherwise
-
+    
     - uses: actions/upload-artifact@v4
       with:
         name: Windows-${{ matrix.arch }}
@@ -71,7 +62,6 @@ jobs:
       run: |
         make CXXFLAGS="-Wno-deprecated-copy" -j4
         7z a Linux-${{ matrix.arch }}.7z ./install/*
-#       7z to preserve file permissions
 
     - uses: actions/upload-artifact@v4
       with:
@@ -79,19 +69,26 @@ jobs:
         path: Linux-${{ matrix.arch }}.7z
         if-no-files-found: error
 
-linux-fedora:
-    name: ${{ matrix.config }} Linux ${{ matrix.arch }}
-    runs-on: fedora-latest
+  linux-ubuntu-new:
+    name: ${{ matrix.config }} Linux ${{ matrix.arch }} 24.10
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         arch: [x86_64]
 
     steps:
+    - name: Install Ubuntu 24.10
+      run: |
+        sudo apt-get update
+        sudo apt-get upgrade -y
+        sudo do-release-upgrade -f DistUpgradeViewNonInteractive
+        sudo apt-get update
+
     - name: Install tools
       run: |
-          sudo dnf update
-          sudo dnf install mesa-common-dev qtbase5-dev libjpeg8-dev libglib2.0-dev libpng-dev
+          sudo apt-get -qq update
+          sudo apt-get -y install mesa-common-dev qtbase5-dev libjpeg8-dev libglib2.0-dev libpng-dev
     - uses: actions/checkout@v4
       with:
         submodules: recursive
@@ -99,18 +96,17 @@ linux-fedora:
     - name: Build
       run: |
         make CXXFLAGS="-Wno-deprecated-copy" -j4
-        7z a Linux-${{ matrix.arch }}.7z ./install/*
-#       7z to preserve file permissions
+        7z a Linux-${{ matrix.arch }}-24.10.7z ./install/*
 
     - uses: actions/upload-artifact@v4
       with:
-        name: Linux-${{ matrix.arch }}
-        path: Linux-${{ matrix.arch }}.7z
+        name: Linux-${{ matrix.arch }}-24.10
+        path: Linux-${{ matrix.arch }}-24.10.7z
         if-no-files-found: error
 
   create-testing:
     if: github.ref == 'refs/heads/master' && ( github.event_name == 'push' || github.event_name == 'workflow_dispatch' )
-    needs: [windows-msys, linux-ubuntu, linux-fedora]
+    needs: [windows-msys, linux-ubuntu, linux-ubuntu-new]
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
@@ -121,7 +117,7 @@ linux-fedora:
         run: |
           mv Windows-x86_64/Windows-x86_64.zip netradiant-custom-$(date +%Y%m%d)-windows-x86_64.zip
           mv Linux-x86_64/Linux-x86_64.7z netradiant-custom-$(date +%Y%m%d)-linux-x86_64.7z
-#         note: 7z dir/* doesn't match .bla (hidden) file in linux under dir/ but matches in subfolders  # or doesn't match there now too?
+          mv Linux-x86_64/Linux-x86_64-24.10.7z netradiant-custom-$(date +%Y%m%d)-linux-x86_64-24.10.7z
 
       - name: Get current date
         run: |
