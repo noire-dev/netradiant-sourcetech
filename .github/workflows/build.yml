@@ -90,8 +90,8 @@ linux-fedora:
     steps:
     - name: Install tools
       run: |
-          sudo dnf -qq update
-          sudo dnf -y install mesa-common-dev qtbase5-dev libjpeg8-dev libglib2.0-dev libpng-dev
+          sudo dnf update
+          sudo dnf install mesa-common-dev qtbase5-dev libjpeg8-dev libglib2.0-dev libpng-dev
     - uses: actions/checkout@v4
       with:
         submodules: recursive
