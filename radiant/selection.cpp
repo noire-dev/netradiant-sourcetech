@@ -101,9 +101,9 @@ inline Vector3 sphere_intersect_ray( const Vector3& origin, float radius, const 
 
 inline Vector3 ray_intersect_ray( const Ray& ray, const Ray& other ){
 	const Vector3 intersection = vector3_subtracted( ray.origin, other.origin );
-	//float a = 1;//vector3_dot(ray.direction, ray.direction);        // always >= 0
+	//float a = 1;//vector3_dot( ray.direction, ray.direction );        // always >= 0
 	const double dot = vector3_dot( ray.direction, other.direction );
-	//float c = 1;//vector3_dot(other.direction, other.direction);        // always >= 0
+	//float c = 1;//vector3_dot( other.direction, other.direction );        // always >= 0
 	const double d = vector3_dot( ray.direction, intersection );
 	const double e = vector3_dot( other.direction, intersection );
 	const double D = 1 - dot * dot; //a*c - dot*dot;       // always >= 0
@@ -184,11 +184,29 @@ inline float distance_for_axis( const Vector3& a, const Vector3& b, const Vector
 	return static_cast<float>( vector3_dot( b, axis ) - vector3_dot( a, axis ) );
 }
 
+
+class ModifierFlagsExt : public ModifierFlags
+{
+public:
+	ModifierFlagsExt( const ModifierFlags& other ) : ModifierFlags( other ){}
+	bool shift() const {
+		return bitfield_enabled( *this, c_modifierShift );
+	}
+	bool ctrl() const {
+		return bitfield_enabled( *this, c_modifierControl );
+	}
+	bool alt() const {
+		return bitfield_enabled( *this, c_modifierAlt );
+	}
+};
+
+static ModifierFlagsExt g_modifiers = c_modifierNone;
+
 class Manipulatable
 {
 public:
 	virtual void Construct( const Matrix4& device2manip, const DeviceVector device_point, const AABB& bounds, const Vector3& transform_origin ) = 0;
-	virtual void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) = 0;
+	virtual void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) = 0;
 
 	inline static const View* m_view = 0;
 	inline static DeviceVector m_device_point;
@@ -231,11 +249,11 @@ public:
 		m_start = point_on_sphere( device2manip, device_point );
 		vector3_normalise( m_start );
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = point_on_sphere( device2manip, device_point );
 		vector3_normalise( current );
 
-		if( snap )
+		if( g_modifiers.shift() )
 			for( std::size_t i = 0; i < 3; ++i )
 				if( current[i] == 0.f )
 					return m_rotatable.rotate( quaternion_for_axisangle( g_vector3_axes[i], float_snapped( angle_for_axis( m_start, current, g_vector3_axes[i] ), static_cast<float>( c_pi / 12.0 ) ) ) );
@@ -273,8 +291,8 @@ public:
 			constrain_to_axis( m_start, m_axis );
 		}
 	}
-/// \brief Converts current position to a normalised vector orthogonal to axis.
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	/// \brief Converts current position to a normalised vector orthogonal to axis.
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current;
 		if( m_plane_way ){
 			current = point_on_plane( m_plane, m_view->GetViewMatrix(), device_point ) - m_origin;
@@ -285,7 +303,7 @@ public:
 			constrain_to_axis( current, m_axis );
 		}
 
-		if( snap ){
+		if( g_modifiers.shift() ){
 			m_rotatable.rotate( quaternion_for_axisangle( m_axis, float_snapped( angle_for_axis( m_start, current, m_axis ), static_cast<float>( c_pi / 12.0 ) ) ) );
 		}
 		else{
@@ -359,12 +377,12 @@ public:
 		m_start = point_on_axis( m_axis, device2manip, device_point );
 		m_bounds = bounds;
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = point_on_axis( m_axis, device2manip, device_point );
 		current = vector3_scaled( m_axis, distance_for_axis( m_start, current, m_axis ) );
 
 		current = translation_local2object( current, manip2object );
-		if( snapbbox )
+		if( g_modifiers.ctrl() )
 			aabb_snap_translation( current, m_bounds );
 		else
 			vector3_snap( current, GetSnapGridSize() );
@@ -400,14 +418,14 @@ public:
 		m_startZ = point_on_plane( m_planeZ, m_view->GetViewMatrix(), device_point );
 		m_bounds = bounds;
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = g_vector3_axes[m_axisZ] * vector3_dot( m_planeSelected.normal(), ( point_on_plane( m_planeZ, m_view->GetViewMatrix(), device_point ) - m_startZ ) )
 		                  * ( m_planeSelected.normal()[m_axisZ] >= 0? 1 : -1 );
 
 		if( !std::isfinite( current[0] ) || !std::isfinite( current[1] ) || !std::isfinite( current[2] ) ) // catch INF case, is likely with top of the box in 2D
 			return;
 
-		if( snapbbox )
+		if( g_modifiers.ctrl() )
 			aabb_snap_translation( current, m_bounds );
 		else
 			vector3_snap( current, GetSnapGridSize() );
@@ -434,16 +452,16 @@ public:
 		m_start = point_on_plane( device2manip, device_point );
 		m_bounds = bounds;
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = point_on_plane( device2manip, device_point );
 		current = vector3_subtracted( current, m_start );
 
-		if( snap )
+		if( g_modifiers.shift() ) // snap to axis
 			current *= g_vector3_axes[vector3_max_abs_component_index( current )];
 
 		current = translation_local2object( current, manip2object );
 
-		if( snapbbox )
+		if( g_modifiers.ctrl() ) // snap aabb
 			aabb_snap_translation( current, m_bounds );
 		else
 			vector3_snap( current, GetSnapGridSize() );
@@ -530,9 +548,9 @@ public:
 
 		m_along_plane.reset();
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current( g_vector3_identity );
-		if( snap ){ // move along plane
+		if( g_modifiers.shift() ){ // move along plane
 			if( !m_along_plane ){ // try to initialize plane from original cursor position
 				if( const auto test = testSelect_unselected_scene_point( *m_view, m_device_point, m_device_epsilon );
 					test && test->plane ){
@@ -568,7 +586,7 @@ public:
 			};
 			const Ray ray = ray_for_device_point( matrix4_full_inverse( m_view->GetViewMatrix() ), device_point );
 			const Vector3 nrm = test->plane? Vector3( test->plane->normal() ) : -ray.direction;
-			if( alt ){ // rotate-snap
+			if( g_modifiers.alt() ){ // rotate-snap
 				const Quaternion rotation = quaternion_for_unit_vectors_for_bounds( g_vector3_axes[m_roatateAxis] * m_rotateSign, nrm );
 				const Matrix4 unrot = matrix4_rotation_for_quaternion( quaternion_inverse( rotation ) );
 				const Vector3 unray = matrix4_transformed_direction( unrot,
@@ -595,8 +613,8 @@ public:
 	void set0( const Vector3& start ){
 		m_0 = start;
 	}
-	static bool useCondition( bool snapbbox, const View& view ){
-		return snapbbox && view.fill();
+	static bool useCondition( const ModifierFlagsExt& modifiers, const View& view ){
+		return modifiers.ctrl() && view.fill();
 	}
 };
 
@@ -637,24 +655,24 @@ public:
 
 		m_snapBounds.Construct( device2manip, device_point, bounds, transform_origin );
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
-		if( SnapBounds::useCondition( snapbbox, *m_view ) ){
-			m_snapBounds.Transform( manip2object, device2manip, device_point, snap, snapbbox, alt );
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
+		if( SnapBounds::useCondition( g_modifiers, *m_view ) ){
+			m_snapBounds.Transform( manip2object, device2manip, device_point );
 			return;
 		}
 
 		Vector3 current;
-		if( alt && m_view->fill() )
+		if( g_modifiers.alt() && m_view->fill() ) // Z only
 			current = ( point_on_plane( m_planeZ, m_view->GetViewMatrix(), device_point ) - m_startZ ) * g_vector3_axes[m_axisZ];
 		else{
 			current = point_on_plane( m_planeXY, m_view->GetViewMatrix(), device_point ) - m_startXY;
 			current[m_axisZ] = 0;
 		}
 
-		if( snap )
+		if( g_modifiers.shift() ) // snap to axis
 			current *= g_vector3_axes[vector3_max_abs_component_index( current )];
 
-		if( snapbbox )
+		if( g_modifiers.ctrl() ) // snap aabb
 			aabb_snap_translation( current, m_bounds );
 		else
 			vector3_snap( current, GetSnapGridSize() );
@@ -699,7 +717,7 @@ public:
 		                   );
 		m_bounds = bounds;
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		//globalOutputStream() << "manip2object: " << manip2object << "  device2manip: " << device2manip << "  x: " << x << "  y:" << y << '\n';
 		Vector3 current = point_on_axis( m_axis, device2manip, device_point );
 		Vector3 delta = vector3_subtracted( current, m_start );
@@ -725,13 +743,13 @@ public:
 		for( std::size_t i = 0; i < 3; i++ ){
 			if( m_chosen_extent[i] > 0.0625f && m_axis[i] != 0.f ){ //epsilon to prevent super high scale for set of models, having really small extent, formed by origins
 				scale[i] = ( m_chosen_extent[i] + delta[i] ) / m_chosen_extent[i];
-				if( snapbbox ){
+				if( g_modifiers.ctrl() ){ // snap bbox dimension size to grid
 					const float snappdwidth = float_snapped( scale[i] * m_bounds.extents[i] * 2.f, GetSnapGridSize() );
 					scale[i] = snappdwidth / ( m_bounds.extents[i] * 2.f );
 				}
 			}
 		}
-		if( snap ){
+		if( g_modifiers.shift() ){ // scale all axes equally
 			for( std::size_t i = 0; i < 3; i++ ){
 				if( m_axis[i] == 0.f ){
 					scale[i] = vector3_dot( scale, vector3_scaled( m_axis, m_axis ) );
@@ -772,7 +790,7 @@ public:
 		                   );
 		m_bounds = bounds;
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = point_on_plane( device2manip, device_point );
 		Vector3 delta = vector3_subtracted( current, m_start );
 
@@ -789,7 +807,7 @@ public:
 		}
 
 		const std::size_t ignore_axis = vector3_min_abs_component_index( m_start );
-		if( snap )
+		if( g_modifiers.shift() )
 			start[ignore_axis] = 0.f;
 
 		Vector3 scale(
@@ -802,14 +820,14 @@ public:
 		for( std::size_t i = 0; i < 3; i++ ){
 			if( m_chosen_extent[i] > 0.0625f && start[i] != 0.f ){
 				scale[i] = ( m_chosen_extent[i] + delta[i] ) / m_chosen_extent[i];
-				if( snapbbox ){
+				if( g_modifiers.ctrl() ){ // snap bbox dimension size to grid
 					const float snappdwidth = float_snapped( scale[i] * m_bounds.extents[i] * 2.f, GetSnapGridSize() );
 					scale[i] = snappdwidth / ( m_bounds.extents[i] * 2.f );
 				}
 			}
 		}
 		//globalOutputStream() << "pre snap scale: " << scale << '\n';
-		if( snap ){
+		if( g_modifiers.shift() ){ // snap 2 axes equally
 			float bestscale = ignore_axis != 0 ? scale[0] : scale[1];
 			for( std::size_t i = ignore_axis != 0 ? 1 : 2; i < 3; i++ ){
 				if( ignore_axis != i && fabs( scale[i] ) < fabs( bestscale ) ){
@@ -868,7 +886,7 @@ public:
 		m_bounds = bounds;
 		m_axis_by_extent = bounds.origin[m_axis_by] + bounds.extents[m_axis_by] * m_axis_by_sign - transform_origin[m_axis_by];
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		const Vector3 current = point_on_plane( m_planeZ, m_view->GetViewMatrix(), device_point ) - m_0;
 	//	globalOutputStream() << m_axis_which << " by axis " << m_axis_by << '\n';
 		m_skewable.skew( Skew( m_axis_by * 4 + m_axis_which, m_axis_by_extent != 0.f? float_snapped( current[m_axis_which], GetSnapGridSize() ) / m_axis_by_extent : 0 ) );
@@ -901,7 +919,7 @@ public:
 		m_setSizeZ = m_size[0] = m_size[1] = m_size[2] = GetGridSize();
 		m_newBrushNode = 0;
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 diff_raw = point_on_plane( Plane3( g_vector3_axis_z, vector3_dot( g_vector3_axis_z, Vector3( m_size.x(), m_size.y(), m_setSizeZ ) + m_0 ) ), m_view->GetViewMatrix(), device_point ) - m_0;
 		const Vector3 xydir( vector3_normalised( Vector3( m_view->GetModelview()[2], m_view->GetModelview()[6], 0 ) ) );
 		diff_raw.z() = ( point_on_plane( Plane3( xydir, vector3_dot( xydir, Vector3( m_size.x(), m_size.y(), m_setSizeZ ) + m_0 ) ), m_view->GetViewMatrix(), device_point ) - m_0 ).z();
@@ -911,7 +929,7 @@ public:
 			if( diff[i] == 0 )
 				diff[i] = diff_raw[i] < 0? -GetGridSize() : GetGridSize();
 
-		if( alt ){
+		if( g_modifiers.alt() ){ // height adjustment
 			diff.x() = m_size.x();
 			diff.y() = m_size.y();
 		}
@@ -923,16 +941,16 @@ public:
 		if( z != z || z > 1 ) //catch NAN and behind near, far planes cases
 			return;
 
-		if( snap || snapbbox ){
+		if( g_modifiers.shift() || g_modifiers.ctrl() ){ // square or cube
 			const float squaresize = std::max( fabs( diff.x() ), fabs( diff.y() ) );
 			diff.x() = diff.x() > 0? squaresize : -squaresize; //square
 			diff.y() = diff.y() > 0? squaresize : -squaresize;
-			if( snapbbox && !alt ) //cube
+			if( g_modifiers.ctrl() && !g_modifiers.alt() ) //cube
 				diff.z() = diff.z() > 0? squaresize : -squaresize;
 		}
 
 		m_size = diff;
-		if( alt )
+		if( g_modifiers.alt() )
 			m_setSizeZ = diff.z();
 
 		Vector3 mins( m_0 );
@@ -1038,7 +1056,7 @@ public:
 			}
 		}
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = g_vector3_axes[m_axisZ] * vector3_dot( m_planeSelected.normal(), ( point_on_plane( m_planeZ, m_view->GetViewMatrix(), device_point ) - m_startZ ) )
 		                  * ( m_planeSelected.normal()[m_axisZ] >= 0? 1 : -1 );
 
@@ -1509,8 +1527,7 @@ void AABB_BestPoint( const Matrix4& local2view, clipcull_t cull, const AABB& aab
 		7, 6, 5, 4,
 	};
 
-	Vector3 points[8];
-	aabb_corners( aabb, points );
+	const std::array<Vector3, 8> points = aabb_corners( aabb );
 
 	const IndexPointer indices( indices_, 24 );
 
@@ -1574,1676 +1591,6 @@ void Triangles_BestPoint( const Matrix4& local2view, clipcull_t cull, FlatShaded
 		);
 	}
 }
-
-
-typedef std::multimap<SelectionIntersection, Selectable*> SelectableSortedSet;
-
-class SelectionPool : public Selector
-{
-	SelectableSortedSet m_pool;
-	SelectionIntersection m_intersection;
-	Selectable* m_selectable;
-
-public:
-	void pushSelectable( Selectable& selectable ) override {
-		m_intersection = SelectionIntersection();
-		m_selectable = &selectable;
-	}
-	void popSelectable() override {
-		addSelectable( m_intersection, m_selectable );
-		m_intersection = SelectionIntersection();
-	}
-	void addIntersection( const SelectionIntersection& intersection ) override {
-		assign_if_closer( m_intersection, intersection );
-	}
-	void addSelectable( const SelectionIntersection& intersection, Selectable* selectable ){
-		if ( intersection.valid() ) {
-			m_pool.insert( SelectableSortedSet::value_type( intersection, selectable ) );
-		}
-	}
-
-	typedef SelectableSortedSet::iterator iterator;
-
-	iterator begin(){
-		return m_pool.begin();
-	}
-	iterator end(){
-		return m_pool.end();
-	}
-
-	bool failed(){
-		return m_pool.empty();
-	}
-};
-
-
-const Colour4b g_colour_sphere( 0, 0, 0, 255 );
-const Colour4b g_colour_screen( 0, 255, 255, 255 );
-const Colour4b g_colour_selected( 255, 255, 0, 255 );
-
-inline const Colour4b& colourSelected( const Colour4b& colour, bool selected ){
-	return ( selected ) ? g_colour_selected : colour;
-}
-
-template<typename remap_policy>
-inline void draw_semicircle( const std::size_t segments, const float radius, PointVertex* vertices, remap_policy remap ){
-	const double increment = c_pi / double(segments << 2);
-
-	std::size_t count = 0;
-	float x = radius;
-	float y = 0;
-	remap_policy::set( vertices[segments << 2].vertex, -radius, 0, 0 );
-	while ( count < segments )
-	{
-		PointVertex* i = vertices + count;
-		PointVertex* j = vertices + ( ( segments << 1 ) - ( count + 1 ) );
-
-		PointVertex* k = i + ( segments << 1 );
-		PointVertex* l = j + ( segments << 1 );
-
-#if 0
-		PointVertex* m = i + ( segments << 2 );
-		PointVertex* n = j + ( segments << 2 );
-		PointVertex* o = k + ( segments << 2 );
-		PointVertex* p = l + ( segments << 2 );
-#endif
-
-		remap_policy::set( i->vertex, x,-y, 0 );
-		remap_policy::set( k->vertex,-y,-x, 0 );
-#if 0
-		remap_policy::set( m->vertex,-x, y, 0 );
-		remap_policy::set( o->vertex, y, x, 0 );
-#endif
-
-		++count;
-
-		{
-			const double theta = increment * count;
-			x = static_cast<float>( radius * cos( theta ) );
-			y = static_cast<float>( radius * sin( theta ) );
-		}
-
-		remap_policy::set( j->vertex, y,-x, 0 );
-		remap_policy::set( l->vertex,-x,-y, 0 );
-#if 0
-		remap_policy::set( n->vertex,-y, x, 0 );
-		remap_policy::set( p->vertex, x, y, 0 );
-#endif
-	}
-}
-
-class Manipulator
-{
-public:
-	virtual Manipulatable* GetManipulatable() = 0;
-	virtual void testSelect( const View& view, const Matrix4& pivot2world ) = 0;
-	virtual void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ){
-	}
-	virtual void setSelected( bool select ) = 0;
-	virtual bool isSelected() const = 0;
-};
-
-
-inline Vector3 normalised_safe( const Vector3& self ){
-	if ( vector3_equal( self, g_vector3_identity ) ) {
-		return g_vector3_identity;
-	}
-	return vector3_normalised( self );
-}
-
-
-class RotateManipulator : public Manipulator
-{
-	struct RenderableCircle : public OpenGLRenderable
-	{
-		Array<PointVertex> m_vertices;
-
-		RenderableCircle( std::size_t size ) : m_vertices( size ){
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_vertices.data()->colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_vertices.data()->vertex );
-			gl().glDrawArrays( GL_LINE_LOOP, 0, GLsizei( m_vertices.size() ) );
-		}
-		void setColour( const Colour4b& colour ){
-			for ( Array<PointVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i )
-			{
-				( *i ).colour = colour;
-			}
-		}
-	};
-
-	struct RenderableSemiCircle : public OpenGLRenderable
-	{
-		Array<PointVertex> m_vertices;
-
-		RenderableSemiCircle( std::size_t size ) : m_vertices( size ){
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_vertices.data()->colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_vertices.data()->vertex );
-			gl().glDrawArrays( GL_LINE_STRIP, 0, GLsizei( m_vertices.size() ) );
-		}
-		void setColour( const Colour4b& colour ){
-			for ( Array<PointVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i )
-			{
-				( *i ).colour = colour;
-			}
-		}
-	};
-
-	RotateFree m_free;
-	RotateAxis m_axis;
-	Vector3 m_axis_screen;
-	RenderableSemiCircle m_circle_x;
-	RenderableSemiCircle m_circle_y;
-	RenderableSemiCircle m_circle_z;
-	RenderableCircle m_circle_screen;
-	RenderableCircle m_circle_sphere;
-	SelectableBool m_selectable_x;
-	SelectableBool m_selectable_y;
-	SelectableBool m_selectable_z;
-	SelectableBool m_selectable_screen;
-	SelectableBool m_selectable_sphere;
-	Selectable* m_selectable_prev_ptr;
-	Pivot2World m_pivot;
-	Matrix4 m_local2world_x;
-	Matrix4 m_local2world_y;
-	Matrix4 m_local2world_z;
-	bool m_circle_x_visible;
-	bool m_circle_y_visible;
-	bool m_circle_z_visible;
-public:
-	static Shader* m_state_outer;
-
-	RotateManipulator( Rotatable& rotatable, std::size_t segments, float radius ) :
-		m_free( rotatable ),
-		m_axis( rotatable ),
-		m_circle_x( ( segments << 2 ) + 1 ),
-		m_circle_y( ( segments << 2 ) + 1 ),
-		m_circle_z( ( segments << 2 ) + 1 ),
-		m_circle_screen( segments << 3 ),
-		m_circle_sphere( segments << 3 ),
-		m_selectable_prev_ptr( 0 ){
-		draw_semicircle( segments, radius, m_circle_x.m_vertices.data(), RemapYZX() );
-		draw_semicircle( segments, radius, m_circle_y.m_vertices.data(), RemapZXY() );
-		draw_semicircle( segments, radius, m_circle_z.m_vertices.data(), RemapXYZ() );
-
-		draw_circle( segments, radius * 1.15f, m_circle_screen.m_vertices.data(), RemapXYZ() );
-		draw_circle( segments, radius, m_circle_sphere.m_vertices.data(), RemapXYZ() );
-	}
-
-
-	void UpdateColours(){
-		m_circle_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
-		m_circle_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
-		m_circle_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
-		m_circle_screen.setColour( colourSelected( g_colour_screen, m_selectable_screen.isSelected() ) );
-		m_circle_sphere.setColour( colourSelected( g_colour_sphere, false ) );
-	}
-
-	void updateCircleTransforms(){
-		Vector3 localViewpoint( matrix4_transformed_direction( matrix4_transposed( m_pivot.m_worldSpace ), m_pivot.m_viewpointSpace.z().vec3() ) );
-
-		m_circle_x_visible = !vector3_equal_epsilon( g_vector3_axis_x, localViewpoint, 1e-6f );
-		if ( m_circle_x_visible ) {
-			m_local2world_x = g_matrix4_identity;
-			m_local2world_x.y().vec3() = normalised_safe(
-			            vector3_cross( g_vector3_axis_x, localViewpoint )
-			        );
-			m_local2world_x.z().vec3() = normalised_safe(
-			            vector3_cross( m_local2world_x.x().vec3(), m_local2world_x.y().vec3() )
-			        );
-			matrix4_premultiply_by_matrix4( m_local2world_x, m_pivot.m_worldSpace );
-		}
-
-		m_circle_y_visible = !vector3_equal_epsilon( g_vector3_axis_y, localViewpoint, 1e-6f );
-		if ( m_circle_y_visible ) {
-			m_local2world_y = g_matrix4_identity;
-			m_local2world_y.z().vec3() = normalised_safe(
-			            vector3_cross( g_vector3_axis_y, localViewpoint )
-			        );
-			m_local2world_y.x().vec3() = normalised_safe(
-			            vector3_cross( m_local2world_y.y().vec3(), m_local2world_y.z().vec3() )
-			        );
-			matrix4_premultiply_by_matrix4( m_local2world_y, m_pivot.m_worldSpace );
-		}
-
-		m_circle_z_visible = !vector3_equal_epsilon( g_vector3_axis_z, localViewpoint, 1e-6f );
-		if ( m_circle_z_visible ) {
-			m_local2world_z = g_matrix4_identity;
-			m_local2world_z.x().vec3() = normalised_safe(
-			            vector3_cross( g_vector3_axis_z, localViewpoint )
-			        );
-			m_local2world_z.y().vec3() = normalised_safe(
-			            vector3_cross( m_local2world_z.z().vec3(), m_local2world_z.x().vec3() )
-			        );
-			matrix4_premultiply_by_matrix4( m_local2world_z, m_pivot.m_worldSpace );
-		}
-	}
-
-	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
-		m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-		updateCircleTransforms();
-
-		// temp hack
-		UpdateColours();
-
-		renderer.SetState( m_state_outer, Renderer::eWireframeOnly );
-		renderer.SetState( m_state_outer, Renderer::eFullMaterials );
-
-		renderer.addRenderable( m_circle_screen, m_pivot.m_viewpointSpace );
-		renderer.addRenderable( m_circle_sphere, m_pivot.m_viewpointSpace );
-
-		if ( m_circle_x_visible ) {
-			renderer.addRenderable( m_circle_x, m_local2world_x );
-		}
-		if ( m_circle_y_visible ) {
-			renderer.addRenderable( m_circle_y, m_local2world_y );
-		}
-		if ( m_circle_z_visible ) {
-			renderer.addRenderable( m_circle_z, m_local2world_z );
-		}
-	}
-	void testSelect( const View& view, const Matrix4& pivot2world ) override {
-		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
-		updateCircleTransforms();
-
-		SelectionPool selector;
-
-		{
-			{
-				const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_local2world_x ) );
-
-#if defined( DEBUG_SELECTION )
-				g_render_clipped.construct( view.GetViewMatrix() );
-#endif
-
-				SelectionIntersection best;
-				LineStrip_BestPoint( local2view, m_circle_x.m_vertices.data(), m_circle_x.m_vertices.size(), best );
-				selector.addSelectable( best, &m_selectable_x );
-			}
-
-			{
-				const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_local2world_y ) );
-
-#if defined( DEBUG_SELECTION )
-				g_render_clipped.construct( view.GetViewMatrix() );
-#endif
-
-				SelectionIntersection best;
-				LineStrip_BestPoint( local2view, m_circle_y.m_vertices.data(), m_circle_y.m_vertices.size(), best );
-				selector.addSelectable( best, &m_selectable_y );
-			}
-
-			{
-				const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_local2world_z ) );
-
-#if defined( DEBUG_SELECTION )
-				g_render_clipped.construct( view.GetViewMatrix() );
-#endif
-
-				SelectionIntersection best;
-				LineStrip_BestPoint( local2view, m_circle_z.m_vertices.data(), m_circle_z.m_vertices.size(), best );
-				selector.addSelectable( best, &m_selectable_z );
-			}
-		}
-
-		{
-			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_viewpointSpace ) );
-
-			{
-				SelectionIntersection best;
-				LineLoop_BestPoint( local2view, m_circle_screen.m_vertices.data(), m_circle_screen.m_vertices.size(), best );
-				selector.addSelectable( best, &m_selectable_screen );
-			}
-
-//		{
-//			SelectionIntersection best;
-//			Circle_BestPoint( local2view, eClipCullCW, m_circle_sphere.m_vertices.data(), m_circle_sphere.m_vertices.size(), best );
-//			selector.addSelectable( best, &m_selectable_sphere );
-//		}
-		}
-
-		m_axis_screen = m_pivot.m_axis_screen;
-
-		if ( !selector.failed() ) {
-			( *selector.begin() ).second->setSelected( true );
-			if( m_selectable_prev_ptr != ( *selector.begin() ).second ){
-				m_selectable_prev_ptr = ( *selector.begin() ).second;
-				SceneChangeNotify();
-			}
-		}
-		else{
-			m_selectable_sphere.setSelected( true );
-			if( m_selectable_prev_ptr != &m_selectable_sphere ){
-				m_selectable_prev_ptr = &m_selectable_sphere;
-				SceneChangeNotify();
-			}
-		}
-	}
-
-	Manipulatable* GetManipulatable() override {
-		if ( m_selectable_x.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_x );
-			return &m_axis;
-		}
-		else if ( m_selectable_y.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_y );
-			return &m_axis;
-		}
-		else if ( m_selectable_z.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_z );
-			return &m_axis;
-		}
-		else if ( m_selectable_screen.isSelected() ) {
-			m_axis.SetAxis( m_axis_screen );
-			return &m_axis;
-		}
-		else{
-			return &m_free;
-		}
-	}
-
-	void setSelected( bool select ) override {
-		m_selectable_x.setSelected( select );
-		m_selectable_y.setSelected( select );
-		m_selectable_z.setSelected( select );
-		m_selectable_screen.setSelected( select );
-		m_selectable_sphere.setSelected( select );
-	}
-	bool isSelected() const override {
-		return m_selectable_x.isSelected()
-		    || m_selectable_y.isSelected()
-		    || m_selectable_z.isSelected()
-		    || m_selectable_screen.isSelected()
-		    || m_selectable_sphere.isSelected();
-	}
-};
-
-Shader* RotateManipulator::m_state_outer;
-
-
-const float arrowhead_length = 16;
-const float arrowhead_radius = 4;
-
-inline void draw_arrowline( const float length, PointVertex* line, const std::size_t axis ){
-	( *line++ ).vertex = vertex3f_identity;
-	( *line ).vertex = vertex3f_identity;
-	vertex3f_to_array( ( *line ).vertex )[axis] = length - arrowhead_length;
-}
-
-template<typename VertexRemap, typename NormalRemap>
-inline void draw_arrowhead( const std::size_t segments, const float length, FlatShadedVertex* vertices, VertexRemap, NormalRemap ){
-	std::size_t head_tris = ( segments << 3 );
-	const double head_segment = c_2pi / head_tris;
-	for ( std::size_t i = 0; i < head_tris; ++i )
-	{
-		{
-			FlatShadedVertex& point = vertices[i * 6 + 0];
-			VertexRemap::x( point.vertex ) = length - arrowhead_length;
-			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( i * head_segment ) );
-			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( i * head_segment ) );
-			NormalRemap::x( point.normal ) = arrowhead_radius / arrowhead_length;
-			NormalRemap::y( point.normal ) = static_cast<float>( cos( i * head_segment ) );
-			NormalRemap::z( point.normal ) = static_cast<float>( sin( i * head_segment ) );
-		}
-		{
-			FlatShadedVertex& point = vertices[i * 6 + 1];
-			VertexRemap::x( point.vertex ) = length;
-			VertexRemap::y( point.vertex ) = 0;
-			VertexRemap::z( point.vertex ) = 0;
-			NormalRemap::x( point.normal ) = arrowhead_radius / arrowhead_length;
-			NormalRemap::y( point.normal ) = static_cast<float>( cos( ( i + 0.5 ) * head_segment ) );
-			NormalRemap::z( point.normal ) = static_cast<float>( sin( ( i + 0.5 ) * head_segment ) );
-		}
-		{
-			FlatShadedVertex& point = vertices[i * 6 + 2];
-			VertexRemap::x( point.vertex ) = length - arrowhead_length;
-			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( ( i + 1 ) * head_segment ) );
-			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( ( i + 1 ) * head_segment ) );
-			NormalRemap::x( point.normal ) = arrowhead_radius / arrowhead_length;
-			NormalRemap::y( point.normal ) = static_cast<float>( cos( ( i + 1 ) * head_segment ) );
-			NormalRemap::z( point.normal ) = static_cast<float>( sin( ( i + 1 ) * head_segment ) );
-		}
-
-		{
-			FlatShadedVertex& point = vertices[i * 6 + 3];
-			VertexRemap::x( point.vertex ) = length - arrowhead_length;
-			VertexRemap::y( point.vertex ) = 0;
-			VertexRemap::z( point.vertex ) = 0;
-			NormalRemap::x( point.normal ) = -1;
-			NormalRemap::y( point.normal ) = 0;
-			NormalRemap::z( point.normal ) = 0;
-		}
-		{
-			FlatShadedVertex& point = vertices[i * 6 + 4];
-			VertexRemap::x( point.vertex ) = length - arrowhead_length;
-			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( i * head_segment ) );
-			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( i * head_segment ) );
-			NormalRemap::x( point.normal ) = -1;
-			NormalRemap::y( point.normal ) = 0;
-			NormalRemap::z( point.normal ) = 0;
-		}
-		{
-			FlatShadedVertex& point = vertices[i * 6 + 5];
-			VertexRemap::x( point.vertex ) = length - arrowhead_length;
-			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( ( i + 1 ) * head_segment ) );
-			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( ( i + 1 ) * head_segment ) );
-			NormalRemap::x( point.normal ) = -1;
-			NormalRemap::y( point.normal ) = 0;
-			NormalRemap::z( point.normal ) = 0;
-		}
-	}
-}
-
-template<typename Triple>
-class TripleRemapXYZ
-{
-public:
-	static float& x( Triple& triple ){
-		return triple.x();
-	}
-	static float& y( Triple& triple ){
-		return triple.y();
-	}
-	static float& z( Triple& triple ){
-		return triple.z();
-	}
-};
-
-template<typename Triple>
-class TripleRemapYZX
-{
-public:
-	static float& x( Triple& triple ){
-		return triple.y();
-	}
-	static float& y( Triple& triple ){
-		return triple.z();
-	}
-	static float& z( Triple& triple ){
-		return triple.x();
-	}
-};
-
-template<typename Triple>
-class TripleRemapZXY
-{
-public:
-	static float& x( Triple& triple ){
-		return triple.z();
-	}
-	static float& y( Triple& triple ){
-		return triple.x();
-	}
-	static float& z( Triple& triple ){
-		return triple.y();
-	}
-};
-
-class ManipulatorSelectionChangeable
-{
-	Selectable* m_selectable_prev_ptr;
-public:
-	ManipulatorSelectionChangeable() : m_selectable_prev_ptr( 0 ){
-	}
-	void selectionChange( SelectionPool& selector ){
-		if ( !selector.failed() ) {
-			( *selector.begin() ).second->setSelected( true );
-			if( m_selectable_prev_ptr != ( *selector.begin() ).second ){
-				m_selectable_prev_ptr = ( *selector.begin() ).second;
-				SceneChangeNotify();
-			}
-		}
-		else if( m_selectable_prev_ptr ){
-			m_selectable_prev_ptr = 0;
-			SceneChangeNotify();
-		}
-	}
-};
-
-
-
-class TranslateManipulator : public Manipulator, public ManipulatorSelectionChangeable
-{
-	struct RenderableArrowLine : public OpenGLRenderable
-	{
-		PointVertex m_line[2];
-
-		RenderableArrowLine(){
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_line[0].colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_line[0].vertex );
-			gl().glDrawArrays( GL_LINES, 0, 2 );
-		}
-		void setColour( const Colour4b& colour ){
-			m_line[0].colour = colour;
-			m_line[1].colour = colour;
-		}
-	};
-	struct RenderableArrowHead : public OpenGLRenderable
-	{
-		Array<FlatShadedVertex> m_vertices;
-
-		RenderableArrowHead( std::size_t size )
-			: m_vertices( size ){
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( FlatShadedVertex ), &m_vertices.data()->colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->vertex );
-			gl().glNormalPointer( GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->normal );
-			gl().glDrawArrays( GL_TRIANGLES, 0, GLsizei( m_vertices.size() ) );
-		}
-		void setColour( const Colour4b& colour ){
-			for ( Array<FlatShadedVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i )
-			{
-				( *i ).colour = colour;
-			}
-		}
-	};
-	struct RenderableQuad : public OpenGLRenderable
-	{
-		PointVertex m_quad[4];
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_quad[0].colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_quad[0].vertex );
-			gl().glDrawArrays( GL_LINE_LOOP, 0, 4 );
-		}
-		void setColour( const Colour4b& colour ){
-			m_quad[0].colour = colour;
-			m_quad[1].colour = colour;
-			m_quad[2].colour = colour;
-			m_quad[3].colour = colour;
-		}
-	};
-
-	TranslateFree m_free;
-	TranslateAxis m_axis;
-	RenderableArrowLine m_arrow_x;
-	RenderableArrowLine m_arrow_y;
-	RenderableArrowLine m_arrow_z;
-	RenderableArrowHead m_arrow_head_x;
-	RenderableArrowHead m_arrow_head_y;
-	RenderableArrowHead m_arrow_head_z;
-	RenderableQuad m_quad_screen;
-	SelectableBool m_selectable_x;
-	SelectableBool m_selectable_y;
-	SelectableBool m_selectable_z;
-	SelectableBool m_selectable_screen;
-	Pivot2World m_pivot;
-public:
-	static Shader* m_state_wire;
-	static Shader* m_state_fill;
-
-	TranslateManipulator( Translatable& translatable, std::size_t segments, float length ) :
-		m_free( translatable ),
-		m_axis( translatable ),
-		m_arrow_head_x( 3 * 2 * ( segments << 3 ) ),
-		m_arrow_head_y( 3 * 2 * ( segments << 3 ) ),
-		m_arrow_head_z( 3 * 2 * ( segments << 3 ) ){
-		draw_arrowline( length, m_arrow_x.m_line, 0 );
-		draw_arrowhead( segments, length, m_arrow_head_x.m_vertices.data(), TripleRemapXYZ<Vertex3f>(), TripleRemapXYZ<Normal3f>() );
-		draw_arrowline( length, m_arrow_y.m_line, 1 );
-		draw_arrowhead( segments, length, m_arrow_head_y.m_vertices.data(), TripleRemapYZX<Vertex3f>(), TripleRemapYZX<Normal3f>() );
-		draw_arrowline( length, m_arrow_z.m_line, 2 );
-		draw_arrowhead( segments, length, m_arrow_head_z.m_vertices.data(), TripleRemapZXY<Vertex3f>(), TripleRemapZXY<Normal3f>() );
-
-		draw_quad( 16, m_quad_screen.m_quad );
-	}
-
-	void UpdateColours(){
-		m_arrow_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
-		m_arrow_head_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
-		m_arrow_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
-		m_arrow_head_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
-		m_arrow_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
-		m_arrow_head_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
-		m_quad_screen.setColour( colourSelected( g_colour_screen, m_selectable_screen.isSelected() ) );
-	}
-
-	bool manipulator_show_axis( const Pivot2World& pivot, const Vector3& axis ){
-		return fabs( vector3_dot( pivot.m_axis_screen, axis ) ) < 0.95;
-	}
-
-	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
-		m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-
-		// temp hack
-		UpdateColours();
-
-		Vector3 x = vector3_normalised( m_pivot.m_worldSpace.x().vec3() );
-		bool show_x = manipulator_show_axis( m_pivot, x );
-
-		Vector3 y = vector3_normalised( m_pivot.m_worldSpace.y().vec3() );
-		bool show_y = manipulator_show_axis( m_pivot, y );
-
-		Vector3 z = vector3_normalised( m_pivot.m_worldSpace.z().vec3() );
-		bool show_z = manipulator_show_axis( m_pivot, z );
-
-		renderer.SetState( m_state_wire, Renderer::eWireframeOnly );
-		renderer.SetState( m_state_wire, Renderer::eFullMaterials );
-
-		if ( show_x ) {
-			renderer.addRenderable( m_arrow_x, m_pivot.m_worldSpace );
-		}
-		if ( show_y ) {
-			renderer.addRenderable( m_arrow_y, m_pivot.m_worldSpace );
-		}
-		if ( show_z ) {
-			renderer.addRenderable( m_arrow_z, m_pivot.m_worldSpace );
-		}
-
-		renderer.addRenderable( m_quad_screen, m_pivot.m_viewplaneSpace );
-
-		renderer.SetState( m_state_fill, Renderer::eWireframeOnly );
-		renderer.SetState( m_state_fill, Renderer::eFullMaterials );
-
-		if ( show_x ) {
-			renderer.addRenderable( m_arrow_head_x, m_pivot.m_worldSpace );
-		}
-		if ( show_y ) {
-			renderer.addRenderable( m_arrow_head_y, m_pivot.m_worldSpace );
-		}
-		if ( show_z ) {
-			renderer.addRenderable( m_arrow_head_z, m_pivot.m_worldSpace );
-		}
-	}
-	void testSelect( const View& view, const Matrix4& pivot2world ) override {
-		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
-
-		SelectionPool selector;
-
-		Vector3 x = vector3_normalised( m_pivot.m_worldSpace.x().vec3() );
-		bool show_x = manipulator_show_axis( m_pivot, x );
-
-		Vector3 y = vector3_normalised( m_pivot.m_worldSpace.y().vec3() );
-		bool show_y = manipulator_show_axis( m_pivot, y );
-
-		Vector3 z = vector3_normalised( m_pivot.m_worldSpace.z().vec3() );
-		bool show_z = manipulator_show_axis( m_pivot, z );
-
-		{
-			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_viewpointSpace ) );
-
-			{
-				SelectionIntersection best;
-				Quad_BestPoint( local2view, eClipCullCW, m_quad_screen.m_quad, best );
-				if ( best.valid() ) {
-					best = SelectionIntersection( 0, 0 );
-					selector.addSelectable( best, &m_selectable_screen );
-				}
-			}
-		}
-
-		{
-			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_worldSpace ) );
-
-#if defined( DEBUG_SELECTION )
-			g_render_clipped.construct( view.GetViewMatrix() );
-#endif
-
-			if ( show_x ) {
-				SelectionIntersection best;
-				Line_BestPoint( local2view, m_arrow_x.m_line, best );
-				Triangles_BestPoint( local2view, eClipCullCW, m_arrow_head_x.m_vertices.begin(), m_arrow_head_x.m_vertices.end(), best );
-				selector.addSelectable( best, &m_selectable_x );
-			}
-
-			if ( show_y ) {
-				SelectionIntersection best;
-				Line_BestPoint( local2view, m_arrow_y.m_line, best );
-				Triangles_BestPoint( local2view, eClipCullCW, m_arrow_head_y.m_vertices.begin(), m_arrow_head_y.m_vertices.end(), best );
-				selector.addSelectable( best, &m_selectable_y );
-			}
-
-			if ( show_z ) {
-				SelectionIntersection best;
-				Line_BestPoint( local2view, m_arrow_z.m_line, best );
-				Triangles_BestPoint( local2view, eClipCullCW, m_arrow_head_z.m_vertices.begin(), m_arrow_head_z.m_vertices.end(), best );
-				selector.addSelectable( best, &m_selectable_z );
-			}
-		}
-
-		selectionChange( selector );
-	}
-
-	Manipulatable* GetManipulatable() override {
-		if ( m_selectable_x.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_x );
-			return &m_axis;
-		}
-		else if ( m_selectable_y.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_y );
-			return &m_axis;
-		}
-		else if ( m_selectable_z.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_z );
-			return &m_axis;
-		}
-		else
-		{
-			return &m_free;
-		}
-	}
-
-	void setSelected( bool select ) override {
-		m_selectable_x.setSelected( select );
-		m_selectable_y.setSelected( select );
-		m_selectable_z.setSelected( select );
-		m_selectable_screen.setSelected( select );
-	}
-	bool isSelected() const override {
-		return m_selectable_x.isSelected()
-		     | m_selectable_y.isSelected()
-		     | m_selectable_z.isSelected()
-		     | m_selectable_screen.isSelected();
-	}
-};
-
-Shader* TranslateManipulator::m_state_wire;
-Shader* TranslateManipulator::m_state_fill;
-
-class ScaleManipulator : public Manipulator, public ManipulatorSelectionChangeable
-{
-	struct RenderableArrow : public OpenGLRenderable
-	{
-		PointVertex m_line[2];
-
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_line[0].colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_line[0].vertex );
-			gl().glDrawArrays( GL_LINES, 0, 2 );
-		}
-		void setColour( const Colour4b& colour ){
-			m_line[0].colour = colour;
-			m_line[1].colour = colour;
-		}
-	};
-	struct RenderableQuad : public OpenGLRenderable
-	{
-		PointVertex m_quad[4];
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_quad[0].colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_quad[0].vertex );
-			gl().glDrawArrays( GL_QUADS, 0, 4 );
-		}
-		void setColour( const Colour4b& colour ){
-			m_quad[0].colour = colour;
-			m_quad[1].colour = colour;
-			m_quad[2].colour = colour;
-			m_quad[3].colour = colour;
-		}
-	};
-
-	ScaleFree m_free;
-	ScaleAxis m_axis;
-	RenderableArrow m_arrow_x;
-	RenderableArrow m_arrow_y;
-	RenderableArrow m_arrow_z;
-	RenderableQuad m_quad_screen;
-	SelectableBool m_selectable_x;
-	SelectableBool m_selectable_y;
-	SelectableBool m_selectable_z;
-	SelectableBool m_selectable_screen;
-	Pivot2World m_pivot;
-public:
-	ScaleManipulator( Scalable& scalable, std::size_t segments, float length ) :
-		m_free( scalable ),
-		m_axis( scalable ){
-		draw_arrowline( length, m_arrow_x.m_line, 0 );
-		draw_arrowline( length, m_arrow_y.m_line, 1 );
-		draw_arrowline( length, m_arrow_z.m_line, 2 );
-
-		draw_quad( 16, m_quad_screen.m_quad );
-	}
-
-	void UpdateColours(){
-		m_arrow_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
-		m_arrow_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
-		m_arrow_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
-		m_quad_screen.setColour( colourSelected( g_colour_screen, m_selectable_screen.isSelected() ) );
-	}
-
-	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
-		m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-
-		// temp hack
-		UpdateColours();
-
-		renderer.addRenderable( m_arrow_x, m_pivot.m_worldSpace );
-		renderer.addRenderable( m_arrow_y, m_pivot.m_worldSpace );
-		renderer.addRenderable( m_arrow_z, m_pivot.m_worldSpace );
-
-		renderer.addRenderable( m_quad_screen, m_pivot.m_viewpointSpace );
-	}
-	void testSelect( const View& view, const Matrix4& pivot2world ) override {
-		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
-
-		SelectionPool selector;
-
-		{
-			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_worldSpace ) );
-
-#if defined( DEBUG_SELECTION )
-			g_render_clipped.construct( view.GetViewMatrix() );
-#endif
-
-			{
-				SelectionIntersection best;
-				Line_BestPoint( local2view, m_arrow_x.m_line, best );
-				selector.addSelectable( best, &m_selectable_x );
-			}
-
-			{
-				SelectionIntersection best;
-				Line_BestPoint( local2view, m_arrow_y.m_line, best );
-				selector.addSelectable( best, &m_selectable_y );
-			}
-
-			{
-				SelectionIntersection best;
-				Line_BestPoint( local2view, m_arrow_z.m_line, best );
-				selector.addSelectable( best, &m_selectable_z );
-			}
-		}
-
-		{
-			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_viewpointSpace ) );
-
-			{
-				SelectionIntersection best;
-				Quad_BestPoint( local2view, eClipCullCW, m_quad_screen.m_quad, best );
-				selector.addSelectable( best, &m_selectable_screen );
-			}
-		}
-
-		selectionChange( selector );
-	}
-
-	Manipulatable* GetManipulatable() override {
-		if ( m_selectable_x.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_x );
-			return &m_axis;
-		}
-		else if ( m_selectable_y.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_y );
-			return &m_axis;
-		}
-		else if ( m_selectable_z.isSelected() ) {
-			m_axis.SetAxis( g_vector3_axis_z );
-			return &m_axis;
-		}
-		else{
-			m_free.SetAxes( g_vector3_identity, g_vector3_identity );
-			return &m_free;
-		}
-	}
-
-	void setSelected( bool select ) override {
-		m_selectable_x.setSelected( select );
-		m_selectable_y.setSelected( select );
-		m_selectable_z.setSelected( select );
-		m_selectable_screen.setSelected( select );
-	}
-	bool isSelected() const override {
-		return m_selectable_x.isSelected()
-		     | m_selectable_y.isSelected()
-		     | m_selectable_z.isSelected()
-		     | m_selectable_screen.isSelected();
-	}
-};
-
-
-class SkewManipulator : public Manipulator
-{
-	struct RenderableLine : public OpenGLRenderable {
-		PointVertex m_line[2];
-
-		RenderableLine() {
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_line[0].colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_line[0].vertex );
-			gl().glDrawArrays( GL_LINES, 0, 2 );
-		}
-		void setColour( const Colour4b& colour ) {
-			m_line[0].colour = colour;
-			m_line[1].colour = colour;
-		}
-	};
-	struct RenderableArrowHead : public OpenGLRenderable
-	{
-		Array<FlatShadedVertex> m_vertices;
-
-		RenderableArrowHead( std::size_t size )
-			: m_vertices( size ) {
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( FlatShadedVertex ), &m_vertices.data()->colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->vertex );
-			gl().glNormalPointer( GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->normal );
-			gl().glDrawArrays( GL_TRIANGLES, 0, GLsizei( m_vertices.size() ) );
-		}
-		void setColour( const Colour4b & colour ) {
-			for( Array<FlatShadedVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i ) {
-				( *i ).colour = colour;
-			}
-		}
-	};
-	struct RenderablePoint : public OpenGLRenderable
-	{
-		PointVertex m_point;
-		RenderablePoint():
-			m_point( vertex3f_identity ) {
-		}
-		void render( RenderStateFlags state ) const override {
-			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_point.colour );
-			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_point.vertex );
-			gl().glDrawArrays( GL_POINTS, 0, 1 );
-		}
-		void setColour( const Colour4b & colour ) {
-			m_point.colour = colour;
-		}
-	};
-
-	SkewAxis m_skew;
-	TranslateFreeXY_Z m_translateFreeXY_Z;
-	ScaleAxis m_scaleAxis;
-	ScaleFree m_scaleFree;
-	RotateAxis m_rotateAxis;
-	AABB m_bounds_draw;
-	const AABB& m_bounds;
-	Matrix4& m_pivot2world;
-	const bool& m_pivotIsCustom;
-/*
-	RenderableLine m_lineXy_;
-	RenderableLine m_lineXy;
-	RenderableLine m_lineXz_;
-	RenderableLine m_lineXz;
-	RenderableLine m_lineYz_;
-	RenderableLine m_lineYz;
-	RenderableLine m_lineYx_;
-	RenderableLine m_lineYx;
-	RenderableLine m_lineZx_;
-	RenderableLine m_lineZx;
-	RenderableLine m_lineZy_;
-	RenderableLine m_lineZy;
-*/
-	RenderableLine m_lines[3][2][2];
-	SelectableBool m_selectables[3][2][2];	//[X][YZ][-+]
-	SelectableBool m_selectable_translateFree;
-	SelectableBool m_selectables_scale[3][2];	//[X][-+]
-	SelectableBool m_selectables_rotate[3][2][2];	//[X][-+Y][-+Z]
-	Selectable* m_selectable_prev_ptr;
-	Selectable* m_selectable_prev_ptr2;
-	Pivot2World m_pivot;
-	Matrix4 m_worldSpace;
-	RenderableArrowHead m_arrow;
-	Matrix4 m_arrow_modelview;
-	Matrix4 m_arrow_modelview2;
-	RenderablePoint m_point;
-public:
-	static Shader* m_state_wire;
-	static Shader* m_state_fill;
-	static Shader* m_state_point;
-	SkewManipulator( Skewable& skewable, Translatable& translatable, Scalable& scalable, Rotatable& rotatable, AllTransformable& transformable, const AABB& bounds, Matrix4& pivot2world, const bool& pivotIsCustom, const std::size_t segments = 2 ) :
-		m_skew( skewable ),
-		m_translateFreeXY_Z( translatable, transformable ),
-		m_scaleAxis( scalable ),
-		m_scaleFree( scalable ),
-		m_rotateAxis( rotatable ),
-		m_bounds( bounds ),
-		m_pivot2world( pivot2world ),
-		m_pivotIsCustom( pivotIsCustom ),
-		m_selectable_prev_ptr( 0 ),
-		m_selectable_prev_ptr2( 0 ),
-		m_arrow( 3 * 2 * ( segments << 3 ) ) {
-		for ( int i = 0; i < 3; ++i ){
-			for ( int j = 0; j < 2; ++j ){
-				const int x = i;
-				const int y = ( i + j + 1 )%3;
-				Vertex3f& xy_ = m_lines[i][j][0].m_line[0].vertex;
-				Vertex3f& x_y_ = m_lines[i][j][0].m_line[1].vertex;
-				Vertex3f& xy = m_lines[i][j][1].m_line[0].vertex;
-				Vertex3f& x_y = m_lines[i][j][1].m_line[1].vertex;
-				xy = x_y = xy_ = x_y_ = vertex3f_identity;
-				xy[x] = xy_[x] = 1;
-				x_y[x] = x_y_[x] = -1;
-				xy[y] = x_y[y] = 1;
-				xy_[y] = x_y_[y] = -1;
-			}
-		}
-		draw_arrowhead( segments, 0, m_arrow.m_vertices.data(), TripleRemapXYZ<Vertex3f>(), TripleRemapXYZ<Normal3f>() );
-		m_arrow.setColour( g_colour_selected );
-		m_point.setColour( g_colour_selected );
-	}
-
-	void UpdateColours() {
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k )
-					m_lines[i][j][k].setColour( colourSelected( g_colour_screen, m_selectables[i][j][k].isSelected() ) );
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				if( m_selectables_scale[i][j].isSelected() ){
-					m_lines[(i + 1)%3][1][j].setColour( g_colour_z );
-					m_lines[(i + 2)%3][0][j].setColour( g_colour_z );
-				}
-	}
-
-	void updateModelview( const VolumeTest& volume, const Matrix4& pivot2world ){
-		//m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-		//m_pivot.update( matrix4_translation_for_vec3( matrix4_get_translation_vec3( pivot2world ) ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-		m_pivot.update( matrix4_translation_for_vec3( m_bounds.origin ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-		//m_pivot.update( g_matrix4_identity, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() ); //no shaking in cam due to low precision this way; smooth and sometimes very incorrect result
-//		globalOutputStream() << m_pivot.m_worldSpace << '\n';
-		Matrix4& m = m_pivot.m_worldSpace; /* go affine to increase precision */
-		m[1] = m[2] = m[3] = m[4] = m[6] = m[7] = m[8] = m[9] = m[11] = 0;
-		m[15] = 1;
-		m_bounds_draw = aabb_for_oriented_aabb( m_bounds, matrix4_affine_inverse( m_pivot.m_worldSpace ) ); //screen scale
-		for ( int i = 0; i < 3; ++i ){
-			if( m_bounds_draw.extents[i] < 16 )
-				m_bounds_draw.extents[i] = 18;
-			else
-				m_bounds_draw.extents[i] += 2.0f;
-		}
-		m_bounds_draw = aabb_for_oriented_aabb( m_bounds_draw, m_pivot.m_worldSpace ); //world scale
-		m_bounds_draw.origin = m_bounds.origin;
-
-		m_worldSpace = matrix4_multiplied_by_matrix4( matrix4_translation_for_vec3( m_bounds_draw.origin ), matrix4_scale_for_vec3( m_bounds_draw.extents ) );
-		matrix4_premultiply_by_matrix4( m_worldSpace, matrix4_translation_for_vec3( -matrix4_get_translation_vec3( pivot2world ) ) );
-		matrix4_premultiply_by_matrix4( m_worldSpace, pivot2world );
-
-//		globalOutputStream() << m_worldSpace << '\n';
-//		globalOutputStream() << pivot2world << '\n';
-	}
-
-	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
-		updateModelview( volume, pivot2world );
-
-		// temp hack
-		UpdateColours();
-
-		renderer.SetState( m_state_wire, Renderer::eWireframeOnly );
-		renderer.SetState( m_state_wire, Renderer::eFullMaterials );
-
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j ){
-#if 0
-				const Vector3 dir = ( m_lines[i][j][0].m_line[0].vertex - m_lines[i][j][1].m_line[0].vertex ) / 2;
-				const float dot = vector3_dot( dir, m_pivot.m_axis_screen );
-				if( dot > 0.9999f )
-					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
-				else if( dot < -0.9999f )
-					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
-				else{
-					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
-					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
-				}
-#else
-				if( m_selectables[i][j][0].isSelected() ){ /* add selected last to get highlighted one rendered on top in 2d */
-					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
-					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
-				}
-				else{
-					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
-					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
-				}
-#endif
-			}
-
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k )
-					if( m_selectables[i][j][k].isSelected() ){
-						Vector3 origin = matrix4_transformed_point( m_worldSpace, m_lines[i][j][k].m_line[0].vertex );
-						Vector3 origin2 = matrix4_transformed_point( m_worldSpace, m_lines[i][j][k].m_line[1].vertex );
-
-						Pivot2World_worldSpace( m_arrow_modelview, matrix4_translation_for_vec3( origin ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-						Pivot2World_worldSpace( m_arrow_modelview2, matrix4_translation_for_vec3( origin2 ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
-
-						const Matrix4 rot( i == 0? g_matrix4_identity: i == 1? matrix4_rotation_for_sincos_z( 1, 0 ): matrix4_rotation_for_sincos_y( -1, 0 ) );
-						matrix4_multiply_by_matrix4( m_arrow_modelview, rot );
-						matrix4_multiply_by_matrix4( m_arrow_modelview2, rot );
-						const float x = 0.7f;
-						matrix4_multiply_by_matrix4( m_arrow_modelview, matrix4_scale_for_vec3( Vector3( x, x, x ) ) );
-						matrix4_multiply_by_matrix4( m_arrow_modelview2, matrix4_scale_for_vec3( Vector3( -x, x, x ) ) );
-
-						renderer.SetState( m_state_fill, Renderer::eWireframeOnly );
-						renderer.SetState( m_state_fill, Renderer::eFullMaterials );
-						renderer.addRenderable( m_arrow, m_arrow_modelview );
-						renderer.addRenderable( m_arrow, m_arrow_modelview2 );
-						return;
-					}
-
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k )
-					if( m_selectables_rotate[i][j][k].isSelected() ){
-						renderer.SetState( m_state_point, Renderer::eWireframeOnly );
-						renderer.SetState( m_state_point, Renderer::eFullMaterials );
-						renderer.addRenderable( m_point, m_worldSpace );
-						renderer.addRenderable( m_point, m_worldSpace );
-						return;
-					}
-	}
-	void testSelect( const View& view, const Matrix4& pivot2world ) override {
-		updateModelview( view, pivot2world );
-
-		SelectionPool selector;
-
-		const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_worldSpace ) );
-		/* try corner points to rotate */
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k ){
-					m_point.m_point.vertex[i] = 0;
-					m_point.m_point.vertex[(i + 1)%3] = j? 1 : -1;
-					m_point.m_point.vertex[(i + 2)%3] = k? 1 : -1;
-					SelectionIntersection best;
-					Point_BestPoint( local2view, m_point.m_point, best );
-					selector.addSelectable( best, &m_selectables_rotate[i][j][k] );
-				}
-		if( !selector.failed() ) {
-			( *selector.begin() ).second->setSelected( true );
-			for ( int i = 0; i < 3; ++i )
-				for ( int j = 0; j < 2; ++j )
-					for ( int k = 0; k < 2; ++k )
-						if( m_selectables_rotate[i][j][k].isSelected() ){
-							m_point.m_point.vertex[i] = 0;
-							m_point.m_point.vertex[(i + 1)%3] = j? 1 : -1;
-							m_point.m_point.vertex[(i + 2)%3] = k? 1 : -1;
-							if( !m_pivotIsCustom ){
-								const Vector3 origin = m_bounds.origin + m_point.m_point.vertex * -1 * m_bounds.extents;
-								m_pivot2world = matrix4_translation_for_vec3( origin );
-							}
-							/* set radius */
-							if( fabs( vector3_dot( m_pivot.m_axis_screen, g_vector3_axes[i] ) ) < 0.2 ){
-								Vector3 origin = matrix4_get_translation_vec3( m_pivot2world );
-								Vector3 point = m_bounds_draw.origin + m_point.m_point.vertex * m_bounds_draw.extents;
-								const Matrix4 inv = matrix4_affine_inverse( m_pivot.m_worldSpace );
-								matrix4_transform_point( inv, origin );
-								matrix4_transform_point( inv, point );
-								point -= origin;
-								point = vector3_added( point, vector3_scaled( m_pivot.m_axis_screen, -vector3_dot( point, m_pivot.m_axis_screen ) ) ); //constrain_to_axis
-								m_rotateAxis.SetRadius( vector3_length( point ) - g_SELECT_EPSILON / 2.0 - 1.0 ); /* use smaller radius to constrain to one rotation direction in 2D */
-								//globalOutputStream() << "radius " << ( vector3_length( point ) - g_SELECT_EPSILON / 2.0 - 1.0 ) << '\n';
-							}
-							else{
-								m_rotateAxis.SetRadius( g_radius );
-								//globalOutputStream() << "g_radius\n";
-							}
-						}
-		}
-		else{
-			/* try lines to skew */
-			for ( int i = 0; i < 3; ++i )
-				for ( int j = 0; j < 2; ++j )
-					for ( int k = 0; k < 2; ++k ){
-						SelectionIntersection best;
-						Line_BestPoint( local2view, m_lines[i][j][k].m_line, best );
-						selector.addSelectable( best, &m_selectables[i][j][k] );
-					}
-
-			if( !selector.failed() ) {
-				( *selector.begin() ).second->setSelected( true );
-				m_skew.set0( vector4_projected( matrix4_transformed_vector4( matrix4_full_inverse( view.GetViewMatrix() ), Vector4( 0, 0, selector.begin()->first.depth(), 1 ) ) ) );
-				if( !m_pivotIsCustom )
-					for ( int i = 0; i < 3; ++i )
-						for ( int j = 0; j < 2; ++j )
-							for ( int k = 0; k < 2; ++k )
-								if( m_selectables[i][j][k].isSelected() ){
-									const int axis_by = ( i + j + 1 ) % 3;
-									Vector3 origin = m_bounds.origin;
-									origin[axis_by] += k? -m_bounds.extents[axis_by] : m_bounds.extents[axis_by];
-									m_pivot2world = matrix4_translation_for_vec3( origin );
-								}
-			}
-			else{ /* try bbox to translate */
-				SelectionIntersection best;
-				AABB_BestPoint( local2view, eClipCullCW, AABB( Vector3( 0, 0, 0 ), Vector3( 1, 1, 1 ) ), best );
-				selector.addSelectable( best, &m_selectable_translateFree );
-				if( !selector.failed() )
-					m_translateFreeXY_Z.set0( vector4_projected( matrix4_transformed_vector4( matrix4_full_inverse( view.GetViewMatrix() ), Vector4( 0, 0, selector.begin()->first.depth(), 1 ) ) ) );
-			}
-		}
-
-		/* try bbox planes to scale*/
-		if( selector.failed() ){
-			const Matrix4 screen2world( matrix4_full_inverse( view.GetViewMatrix() ) );
-
-			Vector3 corners[8];
-			aabb_corners( m_bounds_draw, corners );
-
-			const int indices[24] = {
-				3, 7, 4, 0, //-x
-				2, 1, 5, 6, //+x
-				3, 2, 6, 7, //-y
-				1, 0, 4, 5, //+y
-				7, 6, 5, 4, //-z
-				0, 1, 2, 3, //+z
-			};
-
-			Selectable* selectable = 0;
-			Selectable* selectable2 = 0;
-			double bestDot = 1;
-			const Vector3 viewdir( view.getViewDir() );
-			for ( int i = 0; i < 3; ++i ){
-				for ( int j = 0; j < 2; ++j ){
-					const Vector3 normal = j? g_vector3_axes[i] : -g_vector3_axes[i];
-					const Vector3 centroid = m_bounds.origin + m_bounds.extents * normal;
-					const Vector3 projected = vector4_projected( matrix4_transformed_vector4( view.GetViewMatrix(), Vector4( centroid, 1 ) ) );
-					const Vector3 closest_point = vector4_projected( matrix4_transformed_vector4( screen2world, Vector4( 0, 0, projected[2], 1 ) ) );
-
-					const int index = i * 8 + j * 4;
-					if( vector3_dot( normal, closest_point - corners[indices[index]] ) > 0
-					 && vector3_dot( normal, closest_point - corners[indices[index + 1]] ) > 0
-					 && vector3_dot( normal, closest_point - corners[indices[index + 2]] ) > 0
-					 && vector3_dot( normal, closest_point - corners[indices[index + 3]] ) > 0 )
-					{
-						const double dot = fabs( vector3_dot( normal, viewdir ) );
-						const double diff = bestDot - dot;
-						if( diff > 0.03 ){
-							bestDot = dot;
-							selectable = &m_selectables_scale[i][j];
-							selectable2 = 0;
-						}
-						else if( fabs( diff ) <= 0.03 ){
-							selectable2 = &m_selectables_scale[i][j];
-						}
-					}
-				}
-			}
-//			if( view.GetViewMatrix().xw() != 0 || view.GetViewMatrix().yw() != 0 )
-			if( view.fill() ) // select only plane in camera
-				selectable2 = 0;
-			if( selectable ){
-				Vector3 origin = m_bounds.origin;
-				for ( int i = 0; i < 3; ++i )
-					for ( int j = 0; j < 2; ++j )
-						if( &m_selectables_scale[i][j] == selectable || &m_selectables_scale[i][j] == selectable2 ){
-							m_selectables_scale[i][j].setSelected( true );
-							origin[i] += j? -m_bounds.extents[i] : m_bounds.extents[i];
-						}
-				if( !m_pivotIsCustom )
-					m_pivot2world = matrix4_translation_for_vec3( origin );
-				if( m_selectable_prev_ptr != selectable || m_selectable_prev_ptr2 != selectable2 ){
-					m_selectable_prev_ptr = selectable;
-					m_selectable_prev_ptr2 = selectable2;
-					SceneChangeNotify();
-				}
-				return;
-			}
-
-		}
-
-		if( !selector.failed() ) {
-			( *selector.begin() ).second->setSelected( true );
-			if( m_selectable_prev_ptr != ( *selector.begin() ).second ) {
-				m_selectable_prev_ptr = ( *selector.begin() ).second;
-				m_selectable_prev_ptr2 = 0;
-				SceneChangeNotify();
-			}
-		}
-		else if( m_selectable_prev_ptr ) {
-			m_selectable_prev_ptr = 0;
-			m_selectable_prev_ptr2 = 0;
-			SceneChangeNotify();
-		}
-	}
-
-	Manipulatable* GetManipulatable() override {
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k )
-					if( m_selectables[i][j][k].isSelected() ){
-						m_skew.SetAxes( i, ( i + j + 1 ) % 3, k? 1 : -1 );
-						return &m_skew;
-					}
-					else if( m_selectables_rotate[i][j][k].isSelected() ){
-						m_rotateAxis.SetAxis( g_vector3_axes[i] );
-						return &m_rotateAxis;
-					}
-		{
-			Vector3 axes[2] = { g_vector3_identity, g_vector3_identity };
-			Vector3* axis = axes;
-			for ( int i = 0; i < 3; ++i )
-				for ( int j = 0; j < 2; ++j )
-					if( m_selectables_scale[i][j].isSelected() )
-						(*axis++)[i] = j? 1 : -1;
-			if( m_selectable_prev_ptr2 ){
-				m_scaleFree.SetAxes( axes[0], axes[1] );
-				return &m_scaleFree;
-			}
-			else if( axis != axes ){
-				m_scaleAxis.SetAxis( axes[0] );
-				return &m_scaleAxis;
-			}
-		}
-		return &m_translateFreeXY_Z;
-	}
-
-	void setSelected( bool select ) override {
-		m_selectable_translateFree.setSelected( select );
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k ){
-					m_selectables[i][j][k].setSelected( select );
-					m_selectables_rotate[i][j][k].setSelected( select );
-				}
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				m_selectables_scale[i][j].setSelected( select );
-	}
-	bool isSelected() const override {
-		bool selected = false;
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				for ( int k = 0; k < 2; ++k ){
-					selected |= m_selectables[i][j][k].isSelected();
-					selected |= m_selectables_rotate[i][j][k].isSelected();
-				}
-		for ( int i = 0; i < 3; ++i )
-			for ( int j = 0; j < 2; ++j )
-				selected |= m_selectables_scale[i][j].isSelected();
-		return selected | m_selectable_translateFree.isSelected();
-	}
-};
-
-Shader* SkewManipulator::m_state_wire;
-Shader* SkewManipulator::m_state_fill;
-Shader* SkewManipulator::m_state_point;
-
-
-
-inline PlaneSelectable* Instance_getPlaneSelectable( scene::Instance& instance ){
-	return InstanceTypeCast<PlaneSelectable>::cast( instance );
-}
-
-class PlaneSelectableSelectPlanes : public scene::Graph::Walker
-{
-	Selector& m_selector;
-	SelectionTest& m_test;
-	PlaneCallback m_selectedPlaneCallback;
-public:
-	PlaneSelectableSelectPlanes( Selector& selector, SelectionTest& test, const PlaneCallback& selectedPlaneCallback )
-		: m_selector( selector ), m_test( test ), m_selectedPlaneCallback( selectedPlaneCallback ){
-	}
-	bool pre( const scene::Path& path, scene::Instance& instance ) const override {
-		if ( path.top().get().visible() && Instance_isSelected( instance ) ) {
-			PlaneSelectable* planeSelectable = Instance_getPlaneSelectable( instance );
-			if ( planeSelectable != 0 ) {
-				planeSelectable->selectPlanes( m_selector, m_test, m_selectedPlaneCallback );
-			}
-		}
-		return true;
-	}
-};
-
-class PlaneSelectableSelectReversedPlanes : public scene::Graph::Walker
-{
-	Selector& m_selector;
-	const SelectedPlanes& m_selectedPlanes;
-public:
-	PlaneSelectableSelectReversedPlanes( Selector& selector, const SelectedPlanes& selectedPlanes )
-		: m_selector( selector ), m_selectedPlanes( selectedPlanes ){
-	}
-	bool pre( const scene::Path& path, scene::Instance& instance ) const override {
-		if ( path.top().get().visible() && Instance_isSelected( instance ) ) {
-			PlaneSelectable* planeSelectable = Instance_getPlaneSelectable( instance );
-			if ( planeSelectable != 0 ) {
-				planeSelectable->selectReversedPlanes( m_selector, m_selectedPlanes );
-			}
-		}
-		return true;
-	}
-};
-
-void Scene_forEachPlaneSelectable_selectPlanes( scene::Graph& graph, Selector& selector, SelectionTest& test, const PlaneCallback& selectedPlaneCallback ){
-	graph.traverse( PlaneSelectableSelectPlanes( selector, test, selectedPlaneCallback ) );
-}
-
-void Scene_forEachPlaneSelectable_selectReversedPlanes( scene::Graph& graph, Selector& selector, const SelectedPlanes& selectedPlanes ){
-	graph.traverse( PlaneSelectableSelectReversedPlanes( selector, selectedPlanes ) );
-}
-
-
-class PlaneLess
-{
-public:
-	bool operator()( const Plane3& plane, const Plane3& other ) const {
-		if ( plane.a < other.a ) {
-			return true;
-		}
-		if ( other.a < plane.a ) {
-			return false;
-		}
-
-		if ( plane.b < other.b ) {
-			return true;
-		}
-		if ( other.b < plane.b ) {
-			return false;
-		}
-
-		if ( plane.c < other.c ) {
-			return true;
-		}
-		if ( other.c < plane.c ) {
-			return false;
-		}
-
-		if ( plane.d < other.d ) {
-			return true;
-		}
-		if ( other.d < plane.d ) {
-			return false;
-		}
-
-		return false;
-	}
-};
-
-typedef std::set<Plane3, PlaneLess> PlaneSet;
-
-inline void PlaneSet_insert( PlaneSet& self, const Plane3& plane ){
-	self.insert( plane );
-}
-
-inline bool PlaneSet_contains( const PlaneSet& self, const Plane3& plane ){
-	return self.find( plane ) != self.end();
-}
-
-
-class SelectedPlaneSet : public SelectedPlanes
-{
-	PlaneSet m_selectedPlanes;
-public:
-	bool empty() const {
-		return m_selectedPlanes.empty();
-	}
-
-	void insert( const Plane3& plane ){
-		PlaneSet_insert( m_selectedPlanes, plane );
-	}
-	bool contains( const Plane3& plane ) const override {
-		return PlaneSet_contains( m_selectedPlanes, plane );
-	}
-	typedef MemberCaller1<SelectedPlaneSet, const Plane3&, &SelectedPlaneSet::insert> InsertCaller;
-};
-
-
-bool Scene_forEachPlaneSelectable_selectPlanes( scene::Graph& graph, Selector& selector, SelectionTest& test ){
-	SelectedPlaneSet selectedPlanes;
-
-	Scene_forEachPlaneSelectable_selectPlanes( graph, selector, test, SelectedPlaneSet::InsertCaller( selectedPlanes ) );
-	Scene_forEachPlaneSelectable_selectReversedPlanes( graph, selector, selectedPlanes );
-
-	return !selectedPlanes.empty();
-}
-
-
-
-
-template<typename Functor>
-class PlaneselectableVisibleSelectedVisitor : public SelectionSystem::Visitor
-{
-	const Functor& m_functor;
-public:
-	PlaneselectableVisibleSelectedVisitor( const Functor& functor ) : m_functor( functor ){
-	}
-	void visit( scene::Instance& instance ) const override {
-		PlaneSelectable* planeSelectable = Instance_getPlaneSelectable( instance );
-		if ( planeSelectable != 0
-		     && instance.path().top().get().visible() ) {
-			m_functor( *planeSelectable );
-		}
-	}
-};
-
-template<typename Functor>
-inline const Functor& Scene_forEachVisibleSelectedPlaneselectable( const Functor& functor ){
-	GlobalSelectionSystem().foreachSelected( PlaneselectableVisibleSelectedVisitor<Functor>( functor ) );
-	return functor;
-}
-
-void Scene_forEachPlaneSelectable_bestPlane( SelectionTest& test, Plane3& plane, Vector3& intersectionPoint ){
-	SelectionIntersection intersection;
-	auto bestPlaneDirect = [&test, &plane, &intersection]( PlaneSelectable& planeSelectable ){
-		planeSelectable.bestPlaneDirect( test, plane, intersection );
-	};
-	Scene_forEachVisibleSelectedPlaneselectable( bestPlaneDirect );
-	if( !plane3_valid( plane ) ){
-		float dist( FLT_MAX );
-		auto bestPlaneIndirect = [&test, &plane, &intersectionPoint, &dist]( PlaneSelectable& planeSelectable ){
-			planeSelectable.bestPlaneIndirect( test, plane, intersectionPoint, dist );
-		};
-		Scene_forEachVisibleSelectedPlaneselectable( bestPlaneIndirect );
-	}
-}
-
-bool Scene_forEachPlaneSelectable_selectPlanes2( SelectionTest& test, TranslateAxis2& translateAxis ){
-	Plane3 plane( 0, 0, 0, 0 );
-	Vector3 intersectionPoint( FLT_MAX, FLT_MAX, FLT_MAX );
-	Scene_forEachPlaneSelectable_bestPlane( test, plane, intersectionPoint );
-
-	if( plane3_valid( plane ) ){
-		if( intersectionPoint == Vector3( FLT_MAX, FLT_MAX, FLT_MAX ) ){ // direct
-			translateAxis.set0( point_on_plane( plane, test.getVolume().GetViewMatrix(), DeviceVector( 0, 0 ) ), plane );
-		}
-		else{ // indirect
-			test.BeginMesh( g_matrix4_identity );
-			/* may introduce some screen space offset in manipulatable to handle far-from-edge clicks perfectly; thought clicking not so far isn't too nasty, right? */
-			translateAxis.set0( vector4_projected( matrix4_transformed_vector4( test.getScreen2world(), Vector4( intersectionPoint, 1 ) ) ), plane );
-		}
-
-		auto selectByPlane = [plane]( PlaneSelectable& planeSelectable ){
-			planeSelectable.selectByPlane( plane );
-		};
-		Scene_forEachVisibleSelectedPlaneselectable( selectByPlane );
-	}
-
-	return plane3_valid( plane );
-}
-
-
-void Scene_forEachSelectedBrush_bestPlane( SelectionTest& test, Plane3& plane, Vector3& intersectionPoint ){
-	SelectionIntersection intersection;
-	auto bestPlaneDirect = [&test, &plane, &intersection]( BrushInstance& brushInstance ){
-		brushInstance.bestPlaneDirect( test, plane, intersection );
-	};
-	Scene_forEachVisibleSelectedBrush( bestPlaneDirect );
-	if( !plane3_valid( plane ) ){
-		float dist( FLT_MAX );
-		auto bestPlaneIndirect = [&test, &plane, &intersectionPoint, &dist]( BrushInstance& brushInstance ){
-			brushInstance.bestPlaneIndirect( test, plane, intersectionPoint, dist );
-		};
-		Scene_forEachVisibleSelectedBrush( bestPlaneIndirect );
-	}
-}
-
-void Scene_forEachBrush_bestPlane( SelectionTest& test, Plane3& plane, Vector3& intersectionPoint ){
-	if( g_SelectedFaceInstances.empty() ){
-		Scene_forEachSelectedBrush_bestPlane( test, plane, intersectionPoint );
-	}
-	else{
-		SelectionIntersection intersection;
-		auto bestPlaneDirect = [&test, &plane, &intersection]( BrushInstance& brushInstance ){
-			if( brushInstance.isSelected() || brushInstance.isSelectedComponents() )
-				brushInstance.bestPlaneDirect( test, plane, intersection );
-		};
-
-		Scene_forEachVisibleBrush( GlobalSceneGraph(), bestPlaneDirect );
-		if( !plane3_valid( plane ) ){
-			float dist( FLT_MAX );
-			auto bestPlaneIndirect = [&test, &plane, &intersectionPoint, &dist]( BrushInstance& brushInstance ){
-				if( brushInstance.isSelected() || brushInstance.isSelectedComponents() )
-					brushInstance.bestPlaneIndirect( test, plane, intersectionPoint, dist );
-			};
-			Scene_forEachVisibleBrush( GlobalSceneGraph(), bestPlaneIndirect );
-		}
-	}
-}
-
-bool Scene_forEachBrush_setupExtrude( SelectionTest& test, DragExtrudeFaces& extrudeFaces ){
-	Plane3 plane( 0, 0, 0, 0 );
-	Vector3 intersectionPoint( FLT_MAX, FLT_MAX, FLT_MAX );
-	Scene_forEachBrush_bestPlane( test, plane, intersectionPoint );
-
-	if( plane3_valid( plane ) ){
-		if( intersectionPoint == Vector3( FLT_MAX, FLT_MAX, FLT_MAX ) ){ // direct
-			extrudeFaces.set0( point_on_plane( plane, test.getVolume().GetViewMatrix(), DeviceVector( 0, 0 ) ), plane );
-		}
-		else{ // indirect
-			test.BeginMesh( g_matrix4_identity );
-			/* may introduce some screen space offset in manipulatable to handle far-from-edge clicks perfectly; thought clicking not so far isn't too nasty, right? */
-			extrudeFaces.set0( vector4_projected( matrix4_transformed_vector4( test.getScreen2world(), Vector4( intersectionPoint, 1 ) ) ), plane );
-		}
-		extrudeFaces.m_extrudeSources.clear();
-		auto gatherExtrude = [plane, &extrudeFaces]( BrushInstance& brushInstance ){
-			if( brushInstance.isSelected() || brushInstance.isSelectedComponents() ){
-				bool m_pushed = false;
-				auto gatherFaceInstances = [plane, &extrudeFaces, &brushInstance, &m_pushed]( FaceInstance& face ){
-					if( face.isSelected() || plane3_equal( plane, face.getFace().plane3() ) ){
-						if( !m_pushed ){
-							extrudeFaces.m_extrudeSources.emplace_back();
-							extrudeFaces.m_extrudeSources.back().m_brushInstance = &brushInstance;
-							m_pushed = true;
-						}
-						extrudeFaces.m_extrudeSources.back().m_faces.emplace_back();
-						extrudeFaces.m_extrudeSources.back().m_faces.back().m_face = &face.getFace();
-						planepts_assign( extrudeFaces.m_extrudeSources.back().m_faces.back().m_planepoints, face.getFace().getPlane().getPlanePoints() );
-					}
-				};
-				Brush_ForEachFaceInstance( brushInstance, gatherFaceInstances );
-
-				brushInstance.setSelectedComponents( false, SelectionSystem::eFace );
-				brushInstance.setSelected( false );
-			}
-		};
-		Scene_forEachVisibleBrush( GlobalSceneGraph(), gatherExtrude );
-	}
-
-	return plane3_valid( plane );
-}
-
-
-
-void Scene_Translate_Component_Selected( scene::Graph& graph, const Vector3& translation );
-void Scene_Translate_Selected( scene::Graph& graph, const Vector3& translation );
-void Scene_TestSelect_Primitive( Selector& selector, SelectionTest& test, const VolumeTest& volume );
-void Scene_TestSelect_Component( Selector& selector, SelectionTest& test, const VolumeTest& volume, SelectionSystem::EComponentMode componentMode );
-void Scene_TestSelect_Component_Selected( Selector& selector, SelectionTest& test, const VolumeTest& volume, SelectionSystem::EComponentMode componentMode );
-void Scene_SelectAll_Component( bool select, SelectionSystem::EComponentMode componentMode );
-
-class ResizeTranslatable : public Translatable
-{
-	void translate( const Vector3& translation ) override {
-		Scene_Translate_Component_Selected( GlobalSceneGraph(), translation );
-	}
-};
 
 
 class SelectionVolume : public SelectionTest
@@ -3477,10 +1824,1621 @@ public:
 	}
 };
 
+
+
+typedef std::multimap<SelectionIntersection, Selectable*> SelectableSortedSet;
+
+class SelectionPool : public Selector
+{
+	SelectableSortedSet m_pool;
+	SelectionIntersection m_intersection;
+	Selectable* m_selectable;
+
+public:
+	void pushSelectable( Selectable& selectable ) override {
+		m_intersection = SelectionIntersection();
+		m_selectable = &selectable;
+	}
+	void popSelectable() override {
+		addSelectable( m_intersection, m_selectable );
+		m_intersection = SelectionIntersection();
+	}
+	void addIntersection( const SelectionIntersection& intersection ) override {
+		assign_if_closer( m_intersection, intersection );
+	}
+	void addSelectable( const SelectionIntersection& intersection, Selectable* selectable ){
+		if ( intersection.valid() ) {
+			m_pool.insert( SelectableSortedSet::value_type( intersection, selectable ) );
+		}
+	}
+
+	typedef SelectableSortedSet::iterator iterator;
+
+	iterator begin(){
+		return m_pool.begin();
+	}
+	iterator end(){
+		return m_pool.end();
+	}
+
+	bool failed(){
+		return m_pool.empty();
+	}
+};
+
+
+class ManipulatorSelectionChangeable
+{
+	const Selectable* m_selectable_prev_ptr = nullptr;
+public:
+	void selectionChange( const Selectable *se ){
+		if( m_selectable_prev_ptr != se ){
+			m_selectable_prev_ptr = se;
+			SceneChangeNotify();
+		}
+	}
+	void selectionChange( SelectionPool& selector ){
+		Selectable *se = nullptr;
+		if ( !selector.failed() ) {
+			se = selector.begin()->second;
+			se->setSelected( true );
+		}
+		selectionChange( se );
+	}
+};
+
+
+const Colour4b g_colour_sphere( 0, 0, 0, 255 );
+const Colour4b g_colour_screen( 0, 255, 255, 255 );
+const Colour4b g_colour_selected( 255, 255, 0, 255 );
+
+inline const Colour4b& colourSelected( const Colour4b& colour, bool selected ){
+	return ( selected ) ? g_colour_selected : colour;
+}
+
+template<typename remap_policy>
+inline void draw_semicircle( const std::size_t segments, const float radius, PointVertex* vertices, remap_policy remap ){
+	const double increment = c_pi / double( segments << 2 );
+
+	std::size_t count = 0;
+	float x = radius;
+	float y = 0;
+	remap_policy::set( vertices[segments << 2].vertex, -radius, 0, 0 );
+	while ( count < segments )
+	{
+		PointVertex* i = vertices + count;
+		PointVertex* j = vertices + ( ( segments << 1 ) - ( count + 1 ) );
+
+		PointVertex* k = i + ( segments << 1 );
+		PointVertex* l = j + ( segments << 1 );
+
+#if 0
+		PointVertex* m = i + ( segments << 2 );
+		PointVertex* n = j + ( segments << 2 );
+		PointVertex* o = k + ( segments << 2 );
+		PointVertex* p = l + ( segments << 2 );
+#endif
+
+		remap_policy::set( i->vertex, x,-y, 0 );
+		remap_policy::set( k->vertex,-y,-x, 0 );
+#if 0
+		remap_policy::set( m->vertex,-x, y, 0 );
+		remap_policy::set( o->vertex, y, x, 0 );
+#endif
+
+		++count;
+
+		{
+			const double theta = increment * count;
+			x = static_cast<float>( radius * cos( theta ) );
+			y = static_cast<float>( radius * sin( theta ) );
+		}
+
+		remap_policy::set( j->vertex, y,-x, 0 );
+		remap_policy::set( l->vertex,-x,-y, 0 );
+#if 0
+		remap_policy::set( n->vertex,-y, x, 0 );
+		remap_policy::set( p->vertex, x, y, 0 );
+#endif
+	}
+}
+
+class Manipulator
+{
+public:
+	virtual Manipulatable* GetManipulatable() = 0;
+	virtual void testSelect( const View& view, const Matrix4& pivot2world ) = 0;
+	virtual void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ){
+	}
+	virtual void setSelected( bool select ) = 0;
+	virtual bool isSelected() const = 0;
+};
+
+
+inline Vector3 normalised_safe( const Vector3& self ){
+	if ( vector3_equal( self, g_vector3_identity ) ) {
+		return g_vector3_identity;
+	}
+	return vector3_normalised( self );
+}
+
+
+class RotateManipulator : public Manipulator, public ManipulatorSelectionChangeable
+{
+	struct RenderableCircle : public OpenGLRenderable
+	{
+		Array<PointVertex> m_vertices;
+
+		RenderableCircle( std::size_t size ) : m_vertices( size ){
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_vertices.data()->colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_vertices.data()->vertex );
+			gl().glDrawArrays( GL_LINE_LOOP, 0, GLsizei( m_vertices.size() ) );
+		}
+		void setColour( const Colour4b& colour ){
+			for ( Array<PointVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i )
+			{
+				( *i ).colour = colour;
+			}
+		}
+	};
+
+	struct RenderableSemiCircle : public OpenGLRenderable
+	{
+		Array<PointVertex> m_vertices;
+
+		RenderableSemiCircle( std::size_t size ) : m_vertices( size ){
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_vertices.data()->colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_vertices.data()->vertex );
+			gl().glDrawArrays( GL_LINE_STRIP, 0, GLsizei( m_vertices.size() ) );
+		}
+		void setColour( const Colour4b& colour ){
+			for ( Array<PointVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i )
+			{
+				( *i ).colour = colour;
+			}
+		}
+	};
+
+	RotateFree m_free;
+	RotateAxis m_axis;
+	Vector3 m_axis_screen;
+	RenderableSemiCircle m_circle_x;
+	RenderableSemiCircle m_circle_y;
+	RenderableSemiCircle m_circle_z;
+	RenderableCircle m_circle_screen;
+	RenderableCircle m_circle_sphere;
+	SelectableBool m_selectable_x;
+	SelectableBool m_selectable_y;
+	SelectableBool m_selectable_z;
+	SelectableBool m_selectable_screen;
+	SelectableBool m_selectable_sphere;
+	Pivot2World m_pivot;
+	Matrix4 m_local2world_x;
+	Matrix4 m_local2world_y;
+	Matrix4 m_local2world_z;
+	bool m_circle_x_visible;
+	bool m_circle_y_visible;
+	bool m_circle_z_visible;
+public:
+	static Shader* m_state_outer;
+
+	RotateManipulator( Rotatable& rotatable, std::size_t segments, float radius ) :
+		m_free( rotatable ),
+		m_axis( rotatable ),
+		m_circle_x( ( segments << 2 ) + 1 ),
+		m_circle_y( ( segments << 2 ) + 1 ),
+		m_circle_z( ( segments << 2 ) + 1 ),
+		m_circle_screen( segments << 3 ),
+		m_circle_sphere( segments << 3 ){
+		draw_semicircle( segments, radius, m_circle_x.m_vertices.data(), RemapYZX() );
+		draw_semicircle( segments, radius, m_circle_y.m_vertices.data(), RemapZXY() );
+		draw_semicircle( segments, radius, m_circle_z.m_vertices.data(), RemapXYZ() );
+
+		draw_circle( segments, radius * 1.15f, m_circle_screen.m_vertices.data(), RemapXYZ() );
+		draw_circle( segments, radius, m_circle_sphere.m_vertices.data(), RemapXYZ() );
+	}
+
+
+	void UpdateColours(){
+		m_circle_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
+		m_circle_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
+		m_circle_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
+		m_circle_screen.setColour( colourSelected( g_colour_screen, m_selectable_screen.isSelected() ) );
+		m_circle_sphere.setColour( colourSelected( g_colour_sphere, false ) );
+	}
+
+	void updateCircleTransforms(){
+		Vector3 localViewpoint( matrix4_transformed_direction( matrix4_transposed( m_pivot.m_worldSpace ), m_pivot.m_viewpointSpace.z().vec3() ) );
+
+		m_circle_x_visible = !vector3_equal_epsilon( g_vector3_axis_x, localViewpoint, 1e-6f );
+		if ( m_circle_x_visible ) {
+			m_local2world_x = g_matrix4_identity;
+			m_local2world_x.y().vec3() = normalised_safe(
+			            vector3_cross( g_vector3_axis_x, localViewpoint )
+			        );
+			m_local2world_x.z().vec3() = normalised_safe(
+			            vector3_cross( m_local2world_x.x().vec3(), m_local2world_x.y().vec3() )
+			        );
+			matrix4_premultiply_by_matrix4( m_local2world_x, m_pivot.m_worldSpace );
+		}
+
+		m_circle_y_visible = !vector3_equal_epsilon( g_vector3_axis_y, localViewpoint, 1e-6f );
+		if ( m_circle_y_visible ) {
+			m_local2world_y = g_matrix4_identity;
+			m_local2world_y.z().vec3() = normalised_safe(
+			            vector3_cross( g_vector3_axis_y, localViewpoint )
+			        );
+			m_local2world_y.x().vec3() = normalised_safe(
+			            vector3_cross( m_local2world_y.y().vec3(), m_local2world_y.z().vec3() )
+			        );
+			matrix4_premultiply_by_matrix4( m_local2world_y, m_pivot.m_worldSpace );
+		}
+
+		m_circle_z_visible = !vector3_equal_epsilon( g_vector3_axis_z, localViewpoint, 1e-6f );
+		if ( m_circle_z_visible ) {
+			m_local2world_z = g_matrix4_identity;
+			m_local2world_z.x().vec3() = normalised_safe(
+			            vector3_cross( g_vector3_axis_z, localViewpoint )
+			        );
+			m_local2world_z.y().vec3() = normalised_safe(
+			            vector3_cross( m_local2world_z.z().vec3(), m_local2world_z.x().vec3() )
+			        );
+			matrix4_premultiply_by_matrix4( m_local2world_z, m_pivot.m_worldSpace );
+		}
+	}
+
+	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
+		m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+		updateCircleTransforms();
+
+		// temp hack
+		UpdateColours();
+
+		renderer.SetState( m_state_outer, Renderer::eWireframeOnly );
+		renderer.SetState( m_state_outer, Renderer::eFullMaterials );
+
+		renderer.addRenderable( m_circle_screen, m_pivot.m_viewpointSpace );
+		renderer.addRenderable( m_circle_sphere, m_pivot.m_viewpointSpace );
+
+		if ( m_circle_x_visible ) {
+			renderer.addRenderable( m_circle_x, m_local2world_x );
+		}
+		if ( m_circle_y_visible ) {
+			renderer.addRenderable( m_circle_y, m_local2world_y );
+		}
+		if ( m_circle_z_visible ) {
+			renderer.addRenderable( m_circle_z, m_local2world_z );
+		}
+	}
+	void testSelect( const View& view, const Matrix4& pivot2world ) override {
+		if( g_modifiers != c_modifierNone )
+			return selectionChange( nullptr );
+
+		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
+		updateCircleTransforms();
+
+		SelectionPool selector;
+
+		{
+			{
+				const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_local2world_x ) );
+
+#if defined( DEBUG_SELECTION )
+				g_render_clipped.construct( view.GetViewMatrix() );
+#endif
+
+				SelectionIntersection best;
+				LineStrip_BestPoint( local2view, m_circle_x.m_vertices.data(), m_circle_x.m_vertices.size(), best );
+				selector.addSelectable( best, &m_selectable_x );
+			}
+
+			{
+				const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_local2world_y ) );
+
+#if defined( DEBUG_SELECTION )
+				g_render_clipped.construct( view.GetViewMatrix() );
+#endif
+
+				SelectionIntersection best;
+				LineStrip_BestPoint( local2view, m_circle_y.m_vertices.data(), m_circle_y.m_vertices.size(), best );
+				selector.addSelectable( best, &m_selectable_y );
+			}
+
+			{
+				const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_local2world_z ) );
+
+#if defined( DEBUG_SELECTION )
+				g_render_clipped.construct( view.GetViewMatrix() );
+#endif
+
+				SelectionIntersection best;
+				LineStrip_BestPoint( local2view, m_circle_z.m_vertices.data(), m_circle_z.m_vertices.size(), best );
+				selector.addSelectable( best, &m_selectable_z );
+			}
+		}
+
+		{
+			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_viewpointSpace ) );
+
+			{
+				SelectionIntersection best;
+				LineLoop_BestPoint( local2view, m_circle_screen.m_vertices.data(), m_circle_screen.m_vertices.size(), best );
+				selector.addSelectable( best, &m_selectable_screen );
+			}
+
+//		{
+//			SelectionIntersection best;
+//			Circle_BestPoint( local2view, eClipCullCW, m_circle_sphere.m_vertices.data(), m_circle_sphere.m_vertices.size(), best );
+//			selector.addSelectable( best, &m_selectable_sphere );
+//		}
+		}
+
+		m_axis_screen = m_pivot.m_axis_screen;
+
+		if ( selector.failed() )
+			selector.addSelectable( SelectionIntersection( 0, 0 ), &m_selectable_sphere );
+
+		selectionChange( selector );
+	}
+
+	Manipulatable* GetManipulatable() override {
+		if ( m_selectable_x.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_x );
+			return &m_axis;
+		}
+		else if ( m_selectable_y.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_y );
+			return &m_axis;
+		}
+		else if ( m_selectable_z.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_z );
+			return &m_axis;
+		}
+		else if ( m_selectable_screen.isSelected() ) {
+			m_axis.SetAxis( m_axis_screen );
+			return &m_axis;
+		}
+		else{
+			return &m_free;
+		}
+	}
+
+	void setSelected( bool select ) override {
+		m_selectable_x.setSelected( select );
+		m_selectable_y.setSelected( select );
+		m_selectable_z.setSelected( select );
+		m_selectable_screen.setSelected( select );
+		m_selectable_sphere.setSelected( select );
+	}
+	bool isSelected() const override {
+		return m_selectable_x.isSelected()
+		    || m_selectable_y.isSelected()
+		    || m_selectable_z.isSelected()
+		    || m_selectable_screen.isSelected()
+		    || m_selectable_sphere.isSelected();
+	}
+};
+
+Shader* RotateManipulator::m_state_outer;
+
+
+const float arrowhead_length = 16;
+const float arrowhead_radius = 4;
+
+inline void draw_arrowline( const float length, PointVertex* line, const std::size_t axis ){
+	( *line++ ).vertex = vertex3f_identity;
+	( *line ).vertex = vertex3f_identity;
+	vertex3f_to_array( ( *line ).vertex )[axis] = length - arrowhead_length;
+}
+
+template<typename VertexRemap, typename NormalRemap>
+inline void draw_arrowhead( const std::size_t segments, const float length, FlatShadedVertex* vertices, VertexRemap, NormalRemap ){
+	std::size_t head_tris = ( segments << 3 );
+	const double head_segment = c_2pi / head_tris;
+	for ( std::size_t i = 0; i < head_tris; ++i )
+	{
+		{
+			FlatShadedVertex& point = vertices[i * 6 + 0];
+			VertexRemap::x( point.vertex ) = length - arrowhead_length;
+			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( i * head_segment ) );
+			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( i * head_segment ) );
+			NormalRemap::x( point.normal ) = arrowhead_radius / arrowhead_length;
+			NormalRemap::y( point.normal ) = static_cast<float>( cos( i * head_segment ) );
+			NormalRemap::z( point.normal ) = static_cast<float>( sin( i * head_segment ) );
+		}
+		{
+			FlatShadedVertex& point = vertices[i * 6 + 1];
+			VertexRemap::x( point.vertex ) = length;
+			VertexRemap::y( point.vertex ) = 0;
+			VertexRemap::z( point.vertex ) = 0;
+			NormalRemap::x( point.normal ) = arrowhead_radius / arrowhead_length;
+			NormalRemap::y( point.normal ) = static_cast<float>( cos( ( i + 0.5 ) * head_segment ) );
+			NormalRemap::z( point.normal ) = static_cast<float>( sin( ( i + 0.5 ) * head_segment ) );
+		}
+		{
+			FlatShadedVertex& point = vertices[i * 6 + 2];
+			VertexRemap::x( point.vertex ) = length - arrowhead_length;
+			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( ( i + 1 ) * head_segment ) );
+			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( ( i + 1 ) * head_segment ) );
+			NormalRemap::x( point.normal ) = arrowhead_radius / arrowhead_length;
+			NormalRemap::y( point.normal ) = static_cast<float>( cos( ( i + 1 ) * head_segment ) );
+			NormalRemap::z( point.normal ) = static_cast<float>( sin( ( i + 1 ) * head_segment ) );
+		}
+
+		{
+			FlatShadedVertex& point = vertices[i * 6 + 3];
+			VertexRemap::x( point.vertex ) = length - arrowhead_length;
+			VertexRemap::y( point.vertex ) = 0;
+			VertexRemap::z( point.vertex ) = 0;
+			NormalRemap::x( point.normal ) = -1;
+			NormalRemap::y( point.normal ) = 0;
+			NormalRemap::z( point.normal ) = 0;
+		}
+		{
+			FlatShadedVertex& point = vertices[i * 6 + 4];
+			VertexRemap::x( point.vertex ) = length - arrowhead_length;
+			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( i * head_segment ) );
+			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( i * head_segment ) );
+			NormalRemap::x( point.normal ) = -1;
+			NormalRemap::y( point.normal ) = 0;
+			NormalRemap::z( point.normal ) = 0;
+		}
+		{
+			FlatShadedVertex& point = vertices[i * 6 + 5];
+			VertexRemap::x( point.vertex ) = length - arrowhead_length;
+			VertexRemap::y( point.vertex ) = arrowhead_radius * static_cast<float>( cos( ( i + 1 ) * head_segment ) );
+			VertexRemap::z( point.vertex ) = arrowhead_radius * static_cast<float>( sin( ( i + 1 ) * head_segment ) );
+			NormalRemap::x( point.normal ) = -1;
+			NormalRemap::y( point.normal ) = 0;
+			NormalRemap::z( point.normal ) = 0;
+		}
+	}
+}
+
+template<typename Triple>
+class TripleRemapXYZ
+{
+public:
+	static float& x( Triple& triple ){
+		return triple.x();
+	}
+	static float& y( Triple& triple ){
+		return triple.y();
+	}
+	static float& z( Triple& triple ){
+		return triple.z();
+	}
+};
+
+template<typename Triple>
+class TripleRemapYZX
+{
+public:
+	static float& x( Triple& triple ){
+		return triple.y();
+	}
+	static float& y( Triple& triple ){
+		return triple.z();
+	}
+	static float& z( Triple& triple ){
+		return triple.x();
+	}
+};
+
+template<typename Triple>
+class TripleRemapZXY
+{
+public:
+	static float& x( Triple& triple ){
+		return triple.z();
+	}
+	static float& y( Triple& triple ){
+		return triple.x();
+	}
+	static float& z( Triple& triple ){
+		return triple.y();
+	}
+};
+
+
+
+class TranslateManipulator : public Manipulator, public ManipulatorSelectionChangeable
+{
+	struct RenderableArrowLine : public OpenGLRenderable
+	{
+		PointVertex m_line[2];
+
+		RenderableArrowLine(){
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_line[0].colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_line[0].vertex );
+			gl().glDrawArrays( GL_LINES, 0, 2 );
+		}
+		void setColour( const Colour4b& colour ){
+			m_line[0].colour = colour;
+			m_line[1].colour = colour;
+		}
+	};
+	struct RenderableArrowHead : public OpenGLRenderable
+	{
+		Array<FlatShadedVertex> m_vertices;
+
+		RenderableArrowHead( std::size_t size )
+			: m_vertices( size ){
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( FlatShadedVertex ), &m_vertices.data()->colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->vertex );
+			gl().glNormalPointer( GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->normal );
+			gl().glDrawArrays( GL_TRIANGLES, 0, GLsizei( m_vertices.size() ) );
+		}
+		void setColour( const Colour4b& colour ){
+			for ( Array<FlatShadedVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i )
+			{
+				( *i ).colour = colour;
+			}
+		}
+	};
+	struct RenderableQuad : public OpenGLRenderable
+	{
+		PointVertex m_quad[4];
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_quad[0].colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_quad[0].vertex );
+			gl().glDrawArrays( GL_LINE_LOOP, 0, 4 );
+		}
+		void setColour( const Colour4b& colour ){
+			m_quad[0].colour = colour;
+			m_quad[1].colour = colour;
+			m_quad[2].colour = colour;
+			m_quad[3].colour = colour;
+		}
+	};
+
+	TranslateFree m_free;
+	TranslateAxis m_axis;
+	RenderableArrowLine m_arrow_x;
+	RenderableArrowLine m_arrow_y;
+	RenderableArrowLine m_arrow_z;
+	RenderableArrowHead m_arrow_head_x;
+	RenderableArrowHead m_arrow_head_y;
+	RenderableArrowHead m_arrow_head_z;
+	RenderableQuad m_quad_screen;
+	SelectableBool m_selectable_x;
+	SelectableBool m_selectable_y;
+	SelectableBool m_selectable_z;
+	SelectableBool m_selectable_screen;
+	Pivot2World m_pivot;
+public:
+	static Shader* m_state_wire;
+	static Shader* m_state_fill;
+
+	TranslateManipulator( Translatable& translatable, std::size_t segments, float length ) :
+		m_free( translatable ),
+		m_axis( translatable ),
+		m_arrow_head_x( 3 * 2 * ( segments << 3 ) ),
+		m_arrow_head_y( 3 * 2 * ( segments << 3 ) ),
+		m_arrow_head_z( 3 * 2 * ( segments << 3 ) ){
+		draw_arrowline( length, m_arrow_x.m_line, 0 );
+		draw_arrowhead( segments, length, m_arrow_head_x.m_vertices.data(), TripleRemapXYZ<Vertex3f>(), TripleRemapXYZ<Normal3f>() );
+		draw_arrowline( length, m_arrow_y.m_line, 1 );
+		draw_arrowhead( segments, length, m_arrow_head_y.m_vertices.data(), TripleRemapYZX<Vertex3f>(), TripleRemapYZX<Normal3f>() );
+		draw_arrowline( length, m_arrow_z.m_line, 2 );
+		draw_arrowhead( segments, length, m_arrow_head_z.m_vertices.data(), TripleRemapZXY<Vertex3f>(), TripleRemapZXY<Normal3f>() );
+
+		draw_quad( 16, m_quad_screen.m_quad );
+	}
+
+	void UpdateColours(){
+		m_arrow_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
+		m_arrow_head_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
+		m_arrow_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
+		m_arrow_head_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
+		m_arrow_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
+		m_arrow_head_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
+		m_quad_screen.setColour( colourSelected( g_colour_screen, m_selectable_screen.isSelected() ) );
+	}
+
+	bool manipulator_show_axis( const Pivot2World& pivot, const Vector3& axis ){
+		return fabs( vector3_dot( pivot.m_axis_screen, axis ) ) < 0.95;
+	}
+
+	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
+		m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+
+		// temp hack
+		UpdateColours();
+
+		Vector3 x = vector3_normalised( m_pivot.m_worldSpace.x().vec3() );
+		bool show_x = manipulator_show_axis( m_pivot, x );
+
+		Vector3 y = vector3_normalised( m_pivot.m_worldSpace.y().vec3() );
+		bool show_y = manipulator_show_axis( m_pivot, y );
+
+		Vector3 z = vector3_normalised( m_pivot.m_worldSpace.z().vec3() );
+		bool show_z = manipulator_show_axis( m_pivot, z );
+
+		renderer.SetState( m_state_wire, Renderer::eWireframeOnly );
+		renderer.SetState( m_state_wire, Renderer::eFullMaterials );
+
+		if ( show_x ) {
+			renderer.addRenderable( m_arrow_x, m_pivot.m_worldSpace );
+		}
+		if ( show_y ) {
+			renderer.addRenderable( m_arrow_y, m_pivot.m_worldSpace );
+		}
+		if ( show_z ) {
+			renderer.addRenderable( m_arrow_z, m_pivot.m_worldSpace );
+		}
+
+		renderer.addRenderable( m_quad_screen, m_pivot.m_viewplaneSpace );
+
+		renderer.SetState( m_state_fill, Renderer::eWireframeOnly );
+		renderer.SetState( m_state_fill, Renderer::eFullMaterials );
+
+		if ( show_x ) {
+			renderer.addRenderable( m_arrow_head_x, m_pivot.m_worldSpace );
+		}
+		if ( show_y ) {
+			renderer.addRenderable( m_arrow_head_y, m_pivot.m_worldSpace );
+		}
+		if ( show_z ) {
+			renderer.addRenderable( m_arrow_head_z, m_pivot.m_worldSpace );
+		}
+	}
+	void testSelect( const View& view, const Matrix4& pivot2world ) override {
+		if( g_modifiers != c_modifierNone )
+			return selectionChange( nullptr );
+
+		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
+
+		SelectionPool selector;
+
+		Vector3 x = vector3_normalised( m_pivot.m_worldSpace.x().vec3() );
+		bool show_x = manipulator_show_axis( m_pivot, x );
+
+		Vector3 y = vector3_normalised( m_pivot.m_worldSpace.y().vec3() );
+		bool show_y = manipulator_show_axis( m_pivot, y );
+
+		Vector3 z = vector3_normalised( m_pivot.m_worldSpace.z().vec3() );
+		bool show_z = manipulator_show_axis( m_pivot, z );
+
+		{
+			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_viewpointSpace ) );
+
+			{
+				SelectionIntersection best;
+				Quad_BestPoint( local2view, eClipCullCW, m_quad_screen.m_quad, best );
+				if ( best.valid() ) {
+					best = SelectionIntersection( 0, 0 );
+					selector.addSelectable( best, &m_selectable_screen );
+				}
+			}
+		}
+
+		{
+			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_worldSpace ) );
+
+#if defined( DEBUG_SELECTION )
+			g_render_clipped.construct( view.GetViewMatrix() );
+#endif
+
+			if ( show_x ) {
+				SelectionIntersection best;
+				Line_BestPoint( local2view, m_arrow_x.m_line, best );
+				Triangles_BestPoint( local2view, eClipCullCW, m_arrow_head_x.m_vertices.begin(), m_arrow_head_x.m_vertices.end(), best );
+				selector.addSelectable( best, &m_selectable_x );
+			}
+
+			if ( show_y ) {
+				SelectionIntersection best;
+				Line_BestPoint( local2view, m_arrow_y.m_line, best );
+				Triangles_BestPoint( local2view, eClipCullCW, m_arrow_head_y.m_vertices.begin(), m_arrow_head_y.m_vertices.end(), best );
+				selector.addSelectable( best, &m_selectable_y );
+			}
+
+			if ( show_z ) {
+				SelectionIntersection best;
+				Line_BestPoint( local2view, m_arrow_z.m_line, best );
+				Triangles_BestPoint( local2view, eClipCullCW, m_arrow_head_z.m_vertices.begin(), m_arrow_head_z.m_vertices.end(), best );
+				selector.addSelectable( best, &m_selectable_z );
+			}
+		}
+
+		selectionChange( selector );
+	}
+
+	Manipulatable* GetManipulatable() override {
+		if ( m_selectable_x.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_x );
+			return &m_axis;
+		}
+		else if ( m_selectable_y.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_y );
+			return &m_axis;
+		}
+		else if ( m_selectable_z.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_z );
+			return &m_axis;
+		}
+		else
+		{
+			return &m_free;
+		}
+	}
+
+	void setSelected( bool select ) override {
+		m_selectable_x.setSelected( select );
+		m_selectable_y.setSelected( select );
+		m_selectable_z.setSelected( select );
+		m_selectable_screen.setSelected( select );
+	}
+	bool isSelected() const override {
+		return m_selectable_x.isSelected()
+		    || m_selectable_y.isSelected()
+		    || m_selectable_z.isSelected()
+		    || m_selectable_screen.isSelected();
+	}
+};
+
+Shader* TranslateManipulator::m_state_wire;
+Shader* TranslateManipulator::m_state_fill;
+
+class ScaleManipulator : public Manipulator, public ManipulatorSelectionChangeable
+{
+	struct RenderableArrow : public OpenGLRenderable
+	{
+		PointVertex m_line[2];
+
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_line[0].colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_line[0].vertex );
+			gl().glDrawArrays( GL_LINES, 0, 2 );
+		}
+		void setColour( const Colour4b& colour ){
+			m_line[0].colour = colour;
+			m_line[1].colour = colour;
+		}
+	};
+	struct RenderableQuad : public OpenGLRenderable
+	{
+		PointVertex m_quad[4];
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_quad[0].colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_quad[0].vertex );
+			gl().glDrawArrays( GL_QUADS, 0, 4 );
+		}
+		void setColour( const Colour4b& colour ){
+			m_quad[0].colour = colour;
+			m_quad[1].colour = colour;
+			m_quad[2].colour = colour;
+			m_quad[3].colour = colour;
+		}
+	};
+
+	ScaleFree m_free;
+	ScaleAxis m_axis;
+	RenderableArrow m_arrow_x;
+	RenderableArrow m_arrow_y;
+	RenderableArrow m_arrow_z;
+	RenderableQuad m_quad_screen;
+	SelectableBool m_selectable_x;
+	SelectableBool m_selectable_y;
+	SelectableBool m_selectable_z;
+	SelectableBool m_selectable_screen;
+	Pivot2World m_pivot;
+public:
+	ScaleManipulator( Scalable& scalable, std::size_t segments, float length ) :
+		m_free( scalable ),
+		m_axis( scalable ){
+		draw_arrowline( length, m_arrow_x.m_line, 0 );
+		draw_arrowline( length, m_arrow_y.m_line, 1 );
+		draw_arrowline( length, m_arrow_z.m_line, 2 );
+
+		draw_quad( 16, m_quad_screen.m_quad );
+	}
+
+	void UpdateColours(){
+		m_arrow_x.setColour( colourSelected( g_colour_x, m_selectable_x.isSelected() ) );
+		m_arrow_y.setColour( colourSelected( g_colour_y, m_selectable_y.isSelected() ) );
+		m_arrow_z.setColour( colourSelected( g_colour_z, m_selectable_z.isSelected() ) );
+		m_quad_screen.setColour( colourSelected( g_colour_screen, m_selectable_screen.isSelected() ) );
+	}
+
+	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
+		m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+
+		// temp hack
+		UpdateColours();
+
+		renderer.addRenderable( m_arrow_x, m_pivot.m_worldSpace );
+		renderer.addRenderable( m_arrow_y, m_pivot.m_worldSpace );
+		renderer.addRenderable( m_arrow_z, m_pivot.m_worldSpace );
+
+		renderer.addRenderable( m_quad_screen, m_pivot.m_viewpointSpace );
+	}
+	void testSelect( const View& view, const Matrix4& pivot2world ) override {
+		if( g_modifiers != c_modifierNone )
+			return selectionChange( nullptr );
+
+		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
+
+		SelectionPool selector;
+
+		{
+			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_worldSpace ) );
+
+#if defined( DEBUG_SELECTION )
+			g_render_clipped.construct( view.GetViewMatrix() );
+#endif
+
+			{
+				SelectionIntersection best;
+				Line_BestPoint( local2view, m_arrow_x.m_line, best );
+				selector.addSelectable( best, &m_selectable_x );
+			}
+
+			{
+				SelectionIntersection best;
+				Line_BestPoint( local2view, m_arrow_y.m_line, best );
+				selector.addSelectable( best, &m_selectable_y );
+			}
+
+			{
+				SelectionIntersection best;
+				Line_BestPoint( local2view, m_arrow_z.m_line, best );
+				selector.addSelectable( best, &m_selectable_z );
+			}
+		}
+
+		{
+			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot.m_viewpointSpace ) );
+
+			{
+				SelectionIntersection best;
+				Quad_BestPoint( local2view, eClipCullCW, m_quad_screen.m_quad, best );
+				selector.addSelectable( best, &m_selectable_screen );
+			}
+		}
+
+		selectionChange( selector );
+	}
+
+	Manipulatable* GetManipulatable() override {
+		if ( m_selectable_x.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_x );
+			return &m_axis;
+		}
+		else if ( m_selectable_y.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_y );
+			return &m_axis;
+		}
+		else if ( m_selectable_z.isSelected() ) {
+			m_axis.SetAxis( g_vector3_axis_z );
+			return &m_axis;
+		}
+		else{
+			m_free.SetAxes( g_vector3_identity, g_vector3_identity );
+			return &m_free;
+		}
+	}
+
+	void setSelected( bool select ) override {
+		m_selectable_x.setSelected( select );
+		m_selectable_y.setSelected( select );
+		m_selectable_z.setSelected( select );
+		m_selectable_screen.setSelected( select );
+	}
+	bool isSelected() const override {
+		return m_selectable_x.isSelected()
+		    || m_selectable_y.isSelected()
+		    || m_selectable_z.isSelected()
+		    || m_selectable_screen.isSelected();
+	}
+};
+
+
+#include "dragplanes.h"
+
+class SkewManipulator : public Manipulator, public ManipulatorSelectionChangeable
+{
+	struct RenderableLine : public OpenGLRenderable {
+		PointVertex m_line[2];
+
+		RenderableLine() {
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_line[0].colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_line[0].vertex );
+			gl().glDrawArrays( GL_LINES, 0, 2 );
+		}
+		void setColour( const Colour4b& colour ) {
+			m_line[0].colour = colour;
+			m_line[1].colour = colour;
+		}
+	};
+	struct RenderableArrowHead : public OpenGLRenderable
+	{
+		Array<FlatShadedVertex> m_vertices;
+
+		RenderableArrowHead( std::size_t size )
+			: m_vertices( size ) {
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( FlatShadedVertex ), &m_vertices.data()->colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->vertex );
+			gl().glNormalPointer( GL_FLOAT, sizeof( FlatShadedVertex ), &m_vertices.data()->normal );
+			gl().glDrawArrays( GL_TRIANGLES, 0, GLsizei( m_vertices.size() ) );
+		}
+		void setColour( const Colour4b & colour ) {
+			for( Array<FlatShadedVertex>::iterator i = m_vertices.begin(); i != m_vertices.end(); ++i ) {
+				( *i ).colour = colour;
+			}
+		}
+	};
+	struct RenderablePoint : public OpenGLRenderable
+	{
+		PointVertex m_point;
+		RenderablePoint():
+			m_point( vertex3f_identity ) {
+		}
+		void render( RenderStateFlags state ) const override {
+			gl().glColorPointer( 4, GL_UNSIGNED_BYTE, sizeof( PointVertex ), &m_point.colour );
+			gl().glVertexPointer( 3, GL_FLOAT, sizeof( PointVertex ), &m_point.vertex );
+			gl().glDrawArrays( GL_POINTS, 0, 1 );
+		}
+		void setColour( const Colour4b & colour ) {
+			m_point.colour = colour;
+		}
+	};
+
+	SkewAxis m_skew;
+	TranslateFreeXY_Z m_translateFreeXY_Z;
+	ScaleAxis m_scaleAxis;
+	ScaleFree m_scaleFree;
+	RotateAxis m_rotateAxis;
+	AABB m_bounds_draw;
+	const AABB& m_bounds;
+	Matrix4& m_pivot2world;
+	const bool& m_pivotIsCustom;
+/*
+	RenderableLine m_lineXy_;
+	RenderableLine m_lineXy;
+	RenderableLine m_lineXz_;
+	RenderableLine m_lineXz;
+	RenderableLine m_lineYz_;
+	RenderableLine m_lineYz;
+	RenderableLine m_lineYx_;
+	RenderableLine m_lineYx;
+	RenderableLine m_lineZx_;
+	RenderableLine m_lineZx;
+	RenderableLine m_lineZy_;
+	RenderableLine m_lineZy;
+*/
+	RenderableLine m_lines[3][2][2];
+	SelectableBool m_selectables[3][2][2];	//[X][YZ][-+]
+	SelectableBool m_selectable_translateFree;
+	DragPlanes m_selectables_scale; //+-X+-Y+-Z
+	SelectableBool m_selectables_rotate[3][2][2];	//[X][-+Y][-+Z]
+	Pivot2World m_pivot;
+	Matrix4 m_worldSpace;
+	RenderableArrowHead m_arrow;
+	Matrix4 m_arrow_modelview;
+	Matrix4 m_arrow_modelview2;
+	RenderablePoint m_point;
+public:
+	static Shader* m_state_wire;
+	static Shader* m_state_fill;
+	static Shader* m_state_point;
+	SkewManipulator( Skewable& skewable, Translatable& translatable, Scalable& scalable, Rotatable& rotatable, AllTransformable& transformable, const AABB& bounds, Matrix4& pivot2world, const bool& pivotIsCustom, const std::size_t segments = 2 ) :
+		m_skew( skewable ),
+		m_translateFreeXY_Z( translatable, transformable ),
+		m_scaleAxis( scalable ),
+		m_scaleFree( scalable ),
+		m_rotateAxis( rotatable ),
+		m_bounds( bounds ),
+		m_pivot2world( pivot2world ),
+		m_pivotIsCustom( pivotIsCustom ),
+		m_selectables_scale( {} ),
+		m_arrow( 3 * 2 * ( segments << 3 ) ) {
+		for ( int i = 0; i < 3; ++i ){
+			for ( int j = 0; j < 2; ++j ){
+				const int x = i;
+				const int y = ( i + j + 1 ) % 3;
+				Vertex3f& xy_ = m_lines[i][j][0].m_line[0].vertex;
+				Vertex3f& x_y_ = m_lines[i][j][0].m_line[1].vertex;
+				Vertex3f& xy = m_lines[i][j][1].m_line[0].vertex;
+				Vertex3f& x_y = m_lines[i][j][1].m_line[1].vertex;
+				xy = x_y = xy_ = x_y_ = vertex3f_identity;
+				xy[x] = xy_[x] = 1;
+				x_y[x] = x_y_[x] = -1;
+				xy[y] = x_y[y] = 1;
+				xy_[y] = x_y_[y] = -1;
+			}
+		}
+		draw_arrowhead( segments, 0, m_arrow.m_vertices.data(), TripleRemapXYZ<Vertex3f>(), TripleRemapXYZ<Normal3f>() );
+		m_arrow.setColour( g_colour_selected );
+		m_point.setColour( g_colour_selected );
+	}
+
+	void UpdateColours() {
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k )
+					m_lines[i][j][k].setColour( colourSelected( g_colour_screen, m_selectables[i][j][k].isSelected() ) );
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				if( m_selectables_scale.getSelectables()[i * 2 + j].isSelected() ){
+					m_lines[( i + 1 ) % 3][1][j ^ 1].setColour( g_colour_selected );
+					m_lines[( i + 2 ) % 3][0][j ^ 1].setColour( g_colour_selected );
+				}
+	}
+
+	void updateModelview( const VolumeTest& volume, const Matrix4& pivot2world ){
+		//m_pivot.update( pivot2world, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+		//m_pivot.update( matrix4_translation_for_vec3( matrix4_get_translation_vec3( pivot2world ) ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+		m_pivot.update( matrix4_translation_for_vec3( m_bounds.origin ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+		//m_pivot.update( g_matrix4_identity, volume.GetModelview(), volume.GetProjection(), volume.GetViewport() ); //no shaking in cam due to low precision this way; smooth and sometimes very incorrect result
+//		globalOutputStream() << m_pivot.m_worldSpace << '\n';
+		Matrix4& m = m_pivot.m_worldSpace; /* go affine to increase precision */
+		m[1] = m[2] = m[3] = m[4] = m[6] = m[7] = m[8] = m[9] = m[11] = 0;
+		m[15] = 1;
+		m_bounds_draw = aabb_for_oriented_aabb( m_bounds, matrix4_affine_inverse( m_pivot.m_worldSpace ) ); //screen scale
+		for ( int i = 0; i < 3; ++i ){
+			if( m_bounds_draw.extents[i] < 16 )
+				m_bounds_draw.extents[i] = 18;
+			else
+				m_bounds_draw.extents[i] += 2.0f;
+		}
+		m_bounds_draw = aabb_for_oriented_aabb( m_bounds_draw, m_pivot.m_worldSpace ); //world scale
+		m_bounds_draw.origin = m_bounds.origin;
+
+		m_worldSpace = matrix4_multiplied_by_matrix4( matrix4_translation_for_vec3( m_bounds_draw.origin ), matrix4_scale_for_vec3( m_bounds_draw.extents ) );
+		matrix4_premultiply_by_matrix4( m_worldSpace, matrix4_translation_for_vec3( -matrix4_get_translation_vec3( pivot2world ) ) );
+		matrix4_premultiply_by_matrix4( m_worldSpace, pivot2world );
+
+//		globalOutputStream() << m_worldSpace << '\n';
+//		globalOutputStream() << pivot2world << '\n';
+	}
+
+	void render( Renderer& renderer, const VolumeTest& volume, const Matrix4& pivot2world ) override {
+		updateModelview( volume, pivot2world );
+
+		// temp hack
+		UpdateColours();
+
+		renderer.SetState( m_state_wire, Renderer::eWireframeOnly );
+		renderer.SetState( m_state_wire, Renderer::eFullMaterials );
+
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j ){
+#if 0
+				const Vector3 dir = ( m_lines[i][j][0].m_line[0].vertex - m_lines[i][j][1].m_line[0].vertex ) / 2;
+				const float dot = vector3_dot( dir, m_pivot.m_axis_screen );
+				if( dot > 0.9999f )
+					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
+				else if( dot < -0.9999f )
+					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
+				else{
+					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
+					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
+				}
+#else
+				if( m_selectables[i][j][0].isSelected() ){ /* add selected last to get highlighted one rendered on top in 2d */
+					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
+					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
+				}
+				else{
+					renderer.addRenderable( m_lines[i][j][0], m_worldSpace );
+					renderer.addRenderable( m_lines[i][j][1], m_worldSpace );
+				}
+#endif
+			}
+
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k )
+					if( m_selectables[i][j][k].isSelected() ){
+						Vector3 origin = matrix4_transformed_point( m_worldSpace, m_lines[i][j][k].m_line[0].vertex );
+						Vector3 origin2 = matrix4_transformed_point( m_worldSpace, m_lines[i][j][k].m_line[1].vertex );
+
+						Pivot2World_worldSpace( m_arrow_modelview, matrix4_translation_for_vec3( origin ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+						Pivot2World_worldSpace( m_arrow_modelview2, matrix4_translation_for_vec3( origin2 ), volume.GetModelview(), volume.GetProjection(), volume.GetViewport() );
+
+						const Matrix4 rot( i == 0? g_matrix4_identity: i == 1? matrix4_rotation_for_sincos_z( 1, 0 ): matrix4_rotation_for_sincos_y( -1, 0 ) );
+						matrix4_multiply_by_matrix4( m_arrow_modelview, rot );
+						matrix4_multiply_by_matrix4( m_arrow_modelview2, rot );
+						const float x = 0.7f;
+						matrix4_multiply_by_matrix4( m_arrow_modelview, matrix4_scale_for_vec3( Vector3( x, x, x ) ) );
+						matrix4_multiply_by_matrix4( m_arrow_modelview2, matrix4_scale_for_vec3( Vector3( -x, x, x ) ) );
+
+						renderer.SetState( m_state_fill, Renderer::eWireframeOnly );
+						renderer.SetState( m_state_fill, Renderer::eFullMaterials );
+						renderer.addRenderable( m_arrow, m_arrow_modelview );
+						renderer.addRenderable( m_arrow, m_arrow_modelview2 );
+						return;
+					}
+
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k )
+					if( m_selectables_rotate[i][j][k].isSelected() ){
+						renderer.SetState( m_state_point, Renderer::eWireframeOnly );
+						renderer.SetState( m_state_point, Renderer::eFullMaterials );
+						renderer.addRenderable( m_point, m_worldSpace );
+						renderer.addRenderable( m_point, m_worldSpace );
+						return;
+					}
+	}
+	void testSelect( const View& view, const Matrix4& pivot2world ) override {
+		updateModelview( view, pivot2world );
+		SelectionPool selector;
+		const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_worldSpace ) );
+
+		if( g_modifiers == c_modifierAlt && view.fill() )
+			goto testSelectBboxPlanes;
+		if( g_modifiers != c_modifierNone )
+			return selectionChange( nullptr );
+
+		/* try corner points to rotate */
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k ){
+					m_point.m_point.vertex[i] = 0;
+					m_point.m_point.vertex[( i + 1 ) % 3] = j? 1 : -1;
+					m_point.m_point.vertex[( i + 2 ) % 3] = k? 1 : -1;
+					SelectionIntersection best;
+					Point_BestPoint( local2view, m_point.m_point, best );
+					selector.addSelectable( best, &m_selectables_rotate[i][j][k] );
+				}
+		if( !selector.failed() ) {
+			( *selector.begin() ).second->setSelected( true );
+			for ( int i = 0; i < 3; ++i )
+				for ( int j = 0; j < 2; ++j )
+					for ( int k = 0; k < 2; ++k )
+						if( m_selectables_rotate[i][j][k].isSelected() ){
+							m_point.m_point.vertex[i] = 0;
+							m_point.m_point.vertex[( i + 1 ) % 3] = j? 1 : -1;
+							m_point.m_point.vertex[( i + 2 ) % 3] = k? 1 : -1;
+							if( !m_pivotIsCustom ){
+								const Vector3 origin = m_bounds.origin + m_point.m_point.vertex * -1 * m_bounds.extents;
+								m_pivot2world = matrix4_translation_for_vec3( origin );
+							}
+							/* set radius */
+							if( fabs( vector3_dot( m_pivot.m_axis_screen, g_vector3_axes[i] ) ) < 0.2 ){
+								Vector3 origin = matrix4_get_translation_vec3( m_pivot2world );
+								Vector3 point = m_bounds_draw.origin + m_point.m_point.vertex * m_bounds_draw.extents;
+								const Matrix4 inv = matrix4_affine_inverse( m_pivot.m_worldSpace );
+								matrix4_transform_point( inv, origin );
+								matrix4_transform_point( inv, point );
+								point -= origin;
+								point = vector3_added( point, vector3_scaled( m_pivot.m_axis_screen, -vector3_dot( point, m_pivot.m_axis_screen ) ) ); //constrain_to_axis
+								m_rotateAxis.SetRadius( vector3_length( point ) - g_SELECT_EPSILON / 2.0 - 1.0 ); /* use smaller radius to constrain to one rotation direction in 2D */
+								//globalOutputStream() << "radius " << ( vector3_length( point ) - g_SELECT_EPSILON / 2.0 - 1.0 ) << '\n';
+							}
+							else{
+								m_rotateAxis.SetRadius( g_radius );
+								//globalOutputStream() << "g_radius\n";
+							}
+						}
+		}
+		else{
+			/* try lines to skew */
+			for ( int i = 0; i < 3; ++i )
+				for ( int j = 0; j < 2; ++j )
+					for ( int k = 0; k < 2; ++k ){
+						SelectionIntersection best;
+						Line_BestPoint( local2view, m_lines[i][j][k].m_line, best );
+						selector.addSelectable( best, &m_selectables[i][j][k] );
+					}
+
+			if( !selector.failed() ) {
+				( *selector.begin() ).second->setSelected( true );
+				m_skew.set0( vector4_projected( matrix4_transformed_vector4( matrix4_full_inverse( view.GetViewMatrix() ), Vector4( 0, 0, selector.begin()->first.depth(), 1 ) ) ) );
+				if( !m_pivotIsCustom )
+					for ( int i = 0; i < 3; ++i )
+						for ( int j = 0; j < 2; ++j )
+							for ( int k = 0; k < 2; ++k )
+								if( m_selectables[i][j][k].isSelected() ){
+									const int axis_by = ( i + j + 1 ) % 3;
+									Vector3 origin = m_bounds.origin;
+									origin[axis_by] += k? -m_bounds.extents[axis_by] : m_bounds.extents[axis_by];
+									m_pivot2world = matrix4_translation_for_vec3( origin );
+								}
+			}
+			else{ /* try bbox to translate */
+				SelectionIntersection best;
+				AABB_BestPoint( local2view, eClipCullCW, AABB( Vector3( 0, 0, 0 ), Vector3( 1, 1, 1 ) ), best );
+				selector.addSelectable( best, &m_selectable_translateFree );
+				if( !selector.failed() )
+					m_translateFreeXY_Z.set0( vector4_projected( matrix4_transformed_vector4( matrix4_full_inverse( view.GetViewMatrix() ), Vector4( 0, 0, selector.begin()->first.depth(), 1 ) ) ) );
+			}
+		}
+testSelectBboxPlanes:
+		/* try bbox planes to scale */
+		if( selector.failed() ){
+			SelectionVolume test( view );
+			test.BeginMesh( g_matrix4_identity, true );
+
+			if( g_modifiers == c_modifierAlt ){
+				PlaneSelectable::BestPlaneData planeData;
+				m_selectables_scale.bestPlaneDirect( m_bounds_draw, test, planeData );
+				if( !planeData.valid() ){
+					m_selectables_scale.bestPlaneIndirect( m_bounds_draw, test, planeData );
+				}
+				if( planeData.valid() ){
+					m_selectables_scale.selectByPlane( m_bounds_draw, planeData.m_plane );
+				}
+			}
+			else{
+				m_selectables_scale.selectPlanes( m_bounds_draw, selector, test, {} );
+				for( auto& [ intersection, selectable ] : selector )
+					selectable->setSelected( true );
+			}
+
+			std::uintptr_t newsel = 0;
+			Vector3 origin = m_bounds.origin;
+			for ( int i = 0; i < 3; ++i )
+				for ( int j = 0; j < 2; ++j )
+					if( m_selectables_scale.getSelectables()[i * 2 + j].isSelected() ){
+						origin[i] += j? m_bounds.extents[i] : -m_bounds.extents[i];
+						newsel += reinterpret_cast<std::uintptr_t>( &m_selectables_scale.getSelectables()[i * 2 + j] ); // hack: store up to 2 pointers in one
+					}
+			if( !m_pivotIsCustom )
+				m_pivot2world = matrix4_translation_for_vec3( origin );
+			return selectionChange( reinterpret_cast<const ObservedSelectable *>( newsel ) );
+		}
+
+		selectionChange( selector );
+	}
+
+	Manipulatable* GetManipulatable() override {
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k )
+					if( m_selectables[i][j][k].isSelected() ){
+						m_skew.SetAxes( i, ( i + j + 1 ) % 3, k? 1 : -1 );
+						return &m_skew;
+					}
+					else if( m_selectables_rotate[i][j][k].isSelected() ){
+						m_rotateAxis.SetAxis( g_vector3_axes[i] );
+						return &m_rotateAxis;
+					}
+		{
+			Vector3 axes[2] = { g_vector3_identity, g_vector3_identity };
+			Vector3* axis = axes;
+			for ( int i = 0; i < 3; ++i )
+				for ( int j = 0; j < 2; ++j )
+					if( m_selectables_scale.getSelectables()[i * 2 + j].isSelected() )
+						( *axis++ )[i] = j? -1 : 1;
+			if( axis - axes == 2 ){
+				m_scaleFree.SetAxes( axes[0], axes[1] );
+				return &m_scaleFree;
+			}
+			else if( axis - axes == 1 ){
+				m_scaleAxis.SetAxis( axes[0] );
+				return &m_scaleAxis;
+			}
+		}
+		return &m_translateFreeXY_Z;
+	}
+
+	void setSelected( bool select ) override {
+		m_selectable_translateFree.setSelected( select );
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k ){
+					m_selectables[i][j][k].setSelected( select );
+					m_selectables_rotate[i][j][k].setSelected( select );
+				}
+		m_selectables_scale.setSelected( select );
+	}
+	bool isSelected() const override {
+		bool selected = false;
+		for ( int i = 0; i < 3; ++i )
+			for ( int j = 0; j < 2; ++j )
+				for ( int k = 0; k < 2; ++k ){
+					selected |= m_selectables[i][j][k].isSelected();
+					selected |= m_selectables_rotate[i][j][k].isSelected();
+				}
+		selected |= m_selectables_scale.isSelected();
+		return selected | m_selectable_translateFree.isSelected();
+	}
+};
+
+Shader* SkewManipulator::m_state_wire;
+Shader* SkewManipulator::m_state_fill;
+Shader* SkewManipulator::m_state_point;
+
+
+
+inline PlaneSelectable* Instance_getPlaneSelectable( scene::Instance& instance ){
+	return InstanceTypeCast<PlaneSelectable>::cast( instance );
+}
+
+class PlaneSelectableSelectPlanes : public scene::Graph::Walker
+{
+	Selector& m_selector;
+	SelectionTest& m_test;
+	PlaneCallback m_selectedPlaneCallback;
+public:
+	PlaneSelectableSelectPlanes( Selector& selector, SelectionTest& test, const PlaneCallback& selectedPlaneCallback )
+		: m_selector( selector ), m_test( test ), m_selectedPlaneCallback( selectedPlaneCallback ){
+	}
+	bool pre( const scene::Path& path, scene::Instance& instance ) const override {
+		if ( path.top().get().visible() && Instance_isSelected( instance ) ) {
+			PlaneSelectable* planeSelectable = Instance_getPlaneSelectable( instance );
+			if ( planeSelectable != 0 ) {
+				planeSelectable->selectPlanes( m_selector, m_test, m_selectedPlaneCallback );
+			}
+		}
+		return true;
+	}
+};
+
+class PlaneSelectableSelectReversedPlanes : public scene::Graph::Walker
+{
+	Selector& m_selector;
+	const SelectedPlanes& m_selectedPlanes;
+public:
+	PlaneSelectableSelectReversedPlanes( Selector& selector, const SelectedPlanes& selectedPlanes )
+		: m_selector( selector ), m_selectedPlanes( selectedPlanes ){
+	}
+	bool pre( const scene::Path& path, scene::Instance& instance ) const override {
+		if ( path.top().get().visible() && Instance_isSelected( instance ) ) {
+			PlaneSelectable* planeSelectable = Instance_getPlaneSelectable( instance );
+			if ( planeSelectable != 0 ) {
+				planeSelectable->selectReversedPlanes( m_selector, m_selectedPlanes );
+			}
+		}
+		return true;
+	}
+};
+
+void Scene_forEachPlaneSelectable_selectPlanes( scene::Graph& graph, Selector& selector, SelectionTest& test, const PlaneCallback& selectedPlaneCallback ){
+	graph.traverse( PlaneSelectableSelectPlanes( selector, test, selectedPlaneCallback ) );
+}
+
+void Scene_forEachPlaneSelectable_selectReversedPlanes( scene::Graph& graph, Selector& selector, const SelectedPlanes& selectedPlanes ){
+	graph.traverse( PlaneSelectableSelectReversedPlanes( selector, selectedPlanes ) );
+}
+
+
+class PlaneLess
+{
+public:
+	bool operator()( const Plane3& plane, const Plane3& other ) const {
+		if ( plane.a < other.a ) {
+			return true;
+		}
+		if ( other.a < plane.a ) {
+			return false;
+		}
+
+		if ( plane.b < other.b ) {
+			return true;
+		}
+		if ( other.b < plane.b ) {
+			return false;
+		}
+
+		if ( plane.c < other.c ) {
+			return true;
+		}
+		if ( other.c < plane.c ) {
+			return false;
+		}
+
+		if ( plane.d < other.d ) {
+			return true;
+		}
+		if ( other.d < plane.d ) {
+			return false;
+		}
+
+		return false;
+	}
+};
+
+typedef std::set<Plane3, PlaneLess> PlaneSet;
+
+
+class SelectedPlaneSet : public SelectedPlanes
+{
+	PlaneSet m_selectedPlanes;
+public:
+	bool empty() const {
+		return m_selectedPlanes.empty();
+	}
+
+	void insert( const Plane3& plane ){
+		m_selectedPlanes.insert( plane );
+	}
+	bool contains( const Plane3& plane ) const override {
+		return m_selectedPlanes.contains( plane );
+	}
+	typedef MemberCaller<SelectedPlaneSet, void(const Plane3&), &SelectedPlaneSet::insert> InsertCaller;
+};
+
+
+bool Scene_forEachPlaneSelectable_selectPlanes( scene::Graph& graph, Selector& selector, SelectionTest& test ){
+	SelectedPlaneSet selectedPlanes;
+
+	Scene_forEachPlaneSelectable_selectPlanes( graph, selector, test, SelectedPlaneSet::InsertCaller( selectedPlanes ) );
+	Scene_forEachPlaneSelectable_selectReversedPlanes( graph, selector, selectedPlanes );
+
+	return !selectedPlanes.empty();
+}
+
+
+
+
+template<typename Functor>
+class PlaneselectableVisibleSelectedVisitor : public SelectionSystem::Visitor
+{
+	const Functor& m_functor;
+public:
+	PlaneselectableVisibleSelectedVisitor( const Functor& functor ) : m_functor( functor ){
+	}
+	void visit( scene::Instance& instance ) const override {
+		PlaneSelectable* planeSelectable = Instance_getPlaneSelectable( instance );
+		if ( planeSelectable != 0
+		     && instance.path().top().get().visible() ) {
+			m_functor( *planeSelectable );
+		}
+	}
+};
+
+template<typename Functor>
+inline const Functor& Scene_forEachVisibleSelectedPlaneselectable( const Functor& functor ){
+	GlobalSelectionSystem().foreachSelected( PlaneselectableVisibleSelectedVisitor<Functor>( functor ) );
+	return functor;
+}
+
+PlaneSelectable::BestPlaneData Scene_forEachPlaneSelectable_bestPlane( SelectionTest& test ){
+	PlaneSelectable::BestPlaneData planeData;
+	auto bestPlaneDirect = [&test, &planeData]( PlaneSelectable& planeSelectable ){
+		planeSelectable.bestPlaneDirect( test, planeData );
+	};
+	Scene_forEachVisibleSelectedPlaneselectable( bestPlaneDirect );
+	if( !planeData.valid() ){
+		auto bestPlaneIndirect = [&test, &planeData]( PlaneSelectable& planeSelectable ){
+			planeSelectable.bestPlaneIndirect( test, planeData );
+		};
+		Scene_forEachVisibleSelectedPlaneselectable( bestPlaneIndirect );
+	}
+	return planeData;
+}
+
+bool Scene_forEachPlaneSelectable_selectPlanes2( SelectionTest& test, TranslateAxis2& translateAxis ){
+	const auto planeData = Scene_forEachPlaneSelectable_bestPlane( test );
+
+	if( planeData.valid() ){
+		const Plane3 plane = planeData.m_plane;
+		if( planeData.direct() ){ // direct
+			translateAxis.set0( point_on_plane( plane, test.getVolume().GetViewMatrix(), DeviceVector( 0, 0 ) ), plane );
+		}
+		else{ // indirect
+			test.BeginMesh( g_matrix4_identity );
+			/* may introduce some screen space offset in manipulatable to handle far-from-edge clicks perfectly; thought clicking not so far isn't too nasty, right? */
+			translateAxis.set0( vector4_projected( matrix4_transformed_vector4( test.getScreen2world(), Vector4( planeData.m_closestPoint, 1 ) ) ), plane );
+		}
+
+		auto selectByPlane = [plane]( PlaneSelectable& planeSelectable ){
+			planeSelectable.selectByPlane( plane );
+		};
+		Scene_forEachVisibleSelectedPlaneselectable( selectByPlane );
+	}
+
+	return planeData.valid();
+}
+
+
+PlaneSelectable::BestPlaneData Scene_forEachSelectedBrush_bestPlane( SelectionTest& test ){
+	PlaneSelectable::BestPlaneData planeData;
+	auto bestPlaneDirect = [&test, &planeData]( BrushInstance& brushInstance ){
+		brushInstance.bestPlaneDirect( test, planeData );
+	};
+	Scene_forEachVisibleSelectedBrush( bestPlaneDirect );
+	if( !planeData.valid() ){
+		auto bestPlaneIndirect = [&test, &planeData]( BrushInstance& brushInstance ){
+			brushInstance.bestPlaneIndirect( test, planeData );
+		};
+		Scene_forEachVisibleSelectedBrush( bestPlaneIndirect );
+	}
+	return planeData;
+}
+
+PlaneSelectable::BestPlaneData Scene_forEachBrush_bestPlane( SelectionTest& test ){
+	if( g_SelectedFaceInstances.empty() ){
+		return Scene_forEachSelectedBrush_bestPlane( test );
+	}
+	else{
+		PlaneSelectable::BestPlaneData planeData;
+		auto bestPlaneDirect = [&test, &planeData]( BrushInstance& brushInstance ){
+			if( brushInstance.isSelected() || brushInstance.isSelectedComponents() )
+				brushInstance.bestPlaneDirect( test, planeData );
+		};
+
+		Scene_forEachVisibleBrush( GlobalSceneGraph(), bestPlaneDirect );
+		if( !planeData.valid() ){
+			auto bestPlaneIndirect = [&test, &planeData]( BrushInstance& brushInstance ){
+				if( brushInstance.isSelected() || brushInstance.isSelectedComponents() )
+					brushInstance.bestPlaneIndirect( test, planeData );
+			};
+			Scene_forEachVisibleBrush( GlobalSceneGraph(), bestPlaneIndirect );
+		}
+		return planeData;
+	}
+}
+
+bool Scene_forEachBrush_setupExtrude( SelectionTest& test, DragExtrudeFaces& extrudeFaces ){
+	const auto planeData = Scene_forEachBrush_bestPlane( test );
+
+	if( planeData.valid() ){
+		const Plane3 plane = planeData.m_plane;
+		if( planeData.direct() ){ // direct
+			extrudeFaces.set0( point_on_plane( plane, test.getVolume().GetViewMatrix(), DeviceVector( 0, 0 ) ), plane );
+		}
+		else{ // indirect
+			test.BeginMesh( g_matrix4_identity );
+			/* may introduce some screen space offset in manipulatable to handle far-from-edge clicks perfectly; thought clicking not so far isn't too nasty, right? */
+			extrudeFaces.set0( vector4_projected( matrix4_transformed_vector4( test.getScreen2world(), Vector4( planeData.m_closestPoint, 1 ) ) ), plane );
+		}
+		extrudeFaces.m_extrudeSources.clear();
+		auto gatherExtrude = [plane, &extrudeFaces]( BrushInstance& brushInstance ){
+			if( brushInstance.isSelected() || brushInstance.isSelectedComponents() ){
+				bool m_pushed = false;
+				auto gatherFaceInstances = [plane, &extrudeFaces, &brushInstance, &m_pushed]( FaceInstance& face ){
+					if( face.isSelected() || plane3_equal( plane, face.getFace().plane3() ) ){
+						if( !m_pushed ){
+							extrudeFaces.m_extrudeSources.emplace_back();
+							extrudeFaces.m_extrudeSources.back().m_brushInstance = &brushInstance;
+							m_pushed = true;
+						}
+						extrudeFaces.m_extrudeSources.back().m_faces.emplace_back();
+						extrudeFaces.m_extrudeSources.back().m_faces.back().m_face = &face.getFace();
+						planepts_assign( extrudeFaces.m_extrudeSources.back().m_faces.back().m_planepoints, face.getFace().getPlane().getPlanePoints() );
+					}
+				};
+				Brush_ForEachFaceInstance( brushInstance, gatherFaceInstances );
+
+				brushInstance.setSelectedComponents( false, SelectionSystem::eFace );
+				brushInstance.setSelected( false );
+			}
+		};
+		Scene_forEachVisibleBrush( GlobalSceneGraph(), gatherExtrude );
+	}
+
+	return planeData.valid();
+}
+
+
+
+void Scene_Translate_Component_Selected( scene::Graph& graph, const Vector3& translation );
+void Scene_Translate_Selected( scene::Graph& graph, const Vector3& translation );
+void Scene_TestSelect_Primitive( Selector& selector, SelectionTest& test, const VolumeTest& volume );
+void Scene_TestSelect_Component( Selector& selector, SelectionTest& test, const VolumeTest& volume, SelectionSystem::EComponentMode componentMode );
+void Scene_TestSelect_Component_Selected( Selector& selector, SelectionTest& test, const VolumeTest& volume, SelectionSystem::EComponentMode componentMode );
+void Scene_SelectAll_Component( bool select, SelectionSystem::EComponentMode componentMode );
+
+class ResizeTranslatable : public Translatable
+{
+	void translate( const Vector3& translation ) override {
+		Scene_Translate_Component_Selected( GlobalSceneGraph(), translation );
+	}
+};
+
+
 class SelectionCounter
 {
 public:
-	typedef const Selectable& first_argument_type;
+	using func = void(const Selectable &);
 
 	SelectionCounter( const SelectionChangeCallback& onchanged )
 		: m_count( 0 ), m_onchanged( onchanged ){
@@ -3552,12 +3510,12 @@ inline const rect_t SelectionBoxForPoint( const DeviceVector& device_point, cons
 	return selection_box;
 }
 
-inline const rect_t SelectionBoxForArea( const float device_point[2], const float device_delta[2] ){
+inline const rect_t SelectionBoxForArea( const DeviceVector& device_point, const DeviceVector& device_delta ){
 	rect_t selection_box;
-	selection_box.min[0] = ( device_delta[0] < 0 ) ? ( device_point[0] + device_delta[0] ) : ( device_point[0] );
-	selection_box.min[1] = ( device_delta[1] < 0 ) ? ( device_point[1] + device_delta[1] ) : ( device_point[1] );
-	selection_box.max[0] = ( device_delta[0] > 0 ) ? ( device_point[0] + device_delta[0] ) : ( device_point[0] );
-	selection_box.max[1] = ( device_delta[1] > 0 ) ? ( device_point[1] + device_delta[1] ) : ( device_point[1] );
+	selection_box.min[0] = device_point[0] + std::min( device_delta[0], 0.f );
+	selection_box.min[1] = device_point[1] + std::min( device_delta[1], 0.f );
+	selection_box.max[0] = device_point[0] + std::max( device_delta[0], 0.f );
+	selection_box.max[1] = device_point[1] + std::max( device_delta[1], 0.f );
 	selection_box.modifier = device_delta[0] * device_delta[1] < 0?
 	                         rect_t::eToggle
 	                         : device_delta[0] < 0 ?
@@ -3656,7 +3614,7 @@ void translation_for_pivoted_matrix_transform( Vector3& parent_translation, cons
 	        )
 	        /*
 	            matrix4_transformed_point(
-	                matrix4_full_inverse(local_transform),
+	                matrix4_full_inverse( local_transform ),
 	                local_pivot
 	            ),
 	            local_pivot
@@ -3670,7 +3628,7 @@ void translation_for_pivoted_matrix_transform( Vector3& parent_translation, cons
 	   // verify it!
 	   globalOutputStream() << "World pivot is at " << world_pivot << '\n';
 	   globalOutputStream() << "Local pivot is at " << local_pivot << '\n';
-	   globalOutputStream() << "Transformation " << local_transform << " moves it to: " << matrix4_transformed_point(local_transform, local_pivot) << '\n';
+	   globalOutputStream() << "Transformation " << local_transform << " moves it to: " << matrix4_transformed_point( local_transform, local_pivot ) << '\n';
 	   globalOutputStream() << "Must move by " << local_translation << " in the local system" << '\n';
 	   globalOutputStream() << "Must move by " << parent_translation << " in the parent system" << '\n';
 	 */
@@ -4360,18 +4318,15 @@ bool selection_selectVerticesOrFaceVertices( SelectionTest& test ){
 		}
 	}
 	/* otherwise select vertices of brush faces, which lay on best plane */
-	Plane3 plane( 0, 0, 0, 0 );
-	Vector3 intersectionPoint( FLT_MAX, FLT_MAX, FLT_MAX );
-	Scene_forEachSelectedBrush_bestPlane( test, plane, intersectionPoint );
+	const auto planeData = Scene_forEachSelectedBrush_bestPlane( test );
 
-	if( plane3_valid( plane ) ){
-		auto selectVerticesOnPlane = [&plane]( BrushInstance& brushInstance ){
+	if( planeData.valid() ){
+		auto selectVerticesOnPlane = [plane = planeData.m_plane]( BrushInstance& brushInstance ){
 			brushInstance.selectVerticesOnPlane( plane );
 		};
 		Scene_forEachVisibleSelectedBrush( selectVerticesOnPlane );
-
 	}
-	return plane3_valid( plane );
+	return planeData.valid();
 }
 
 
@@ -4399,7 +4354,6 @@ inline const Functor& Scene_forEachVisibleSelectedComponentSelectionTestable( co
 
 
 
-static ModifierFlags g_modifiers = c_modifierNone; //AltDragManipulatorResize, extrude, uvtool skew, select primitives in component modes
 static bool g_bTmpComponentMode = false;
 
 static bool g_3DCreateBrushes = true;
@@ -4460,7 +4414,7 @@ public:
 						m_selected = selection_selectVerticesOrFaceVertices( test );
 					}
 				}
-				else{
+				else if( g_modifiers == c_modifierNone ){
 					BooleanSelector booleanSelector;
 					Scene_TestSelect_Primitive( booleanSelector, test, view );
 
@@ -4474,7 +4428,7 @@ public:
 					}
 				}
 			}
-			else{ // components
+			else if( g_modifiers == c_modifierNone ){ // components
 				BestSelector bestSelector;
 				Scene_TestSelect_Component_Selected( bestSelector, test, view, GlobalSelectionSystem().ComponentMode() ); /* drag components */
 				for ( Selectable* s : bestSelector.best() ){
@@ -4503,7 +4457,7 @@ public:
 				value.second->setSelected( true );
 			g_bTmpComponentMode = m_selected | m_selected2;
 		}
-		else if( GlobalSelectionSystem().Mode() == SelectionSystem::ePrimitive && g_3DCreateBrushes ){
+		else if( GlobalSelectionSystem().Mode() == SelectionSystem::ePrimitive && g_3DCreateBrushes && g_modifiers == c_modifierNone ){
 			m_newBrush = true;
 			BestPointSelector bestPointSelector;
 			Scene_TestSelect_Primitive( bestPointSelector, test, view );
@@ -4553,12 +4507,8 @@ public:
 		if( g_modifiers == ( c_modifierAlt | c_modifierControl )
 		 && GlobalSelectionSystem().Mode() == SelectionSystem::ePrimitive
 		 && ( GlobalSelectionSystem().countSelected() != 0 || !g_SelectedFaceInstances.empty() ) ){ // extrude
-			Plane3 plane( 0, 0, 0, 0 );
-			Vector3 intersectionPoint( FLT_MAX, FLT_MAX, FLT_MAX );
-			Scene_forEachBrush_bestPlane( test, plane, intersectionPoint );
-
-			if( plane3_valid( plane ) ){
-				auto gatherPolygonsByPlane = [plane, &polygons]( BrushInstance& brushInstance ){
+			if( const auto planeData = Scene_forEachBrush_bestPlane( test ); planeData.valid() ){
+				auto gatherPolygonsByPlane = [plane = planeData.m_plane, &polygons]( BrushInstance& brushInstance ){
 					if( brushInstance.isSelected() || brushInstance.isSelectedComponents() )
 						brushInstance.gatherPolygonsByPlane( plane, polygons, false );
 				};
@@ -4569,12 +4519,8 @@ public:
 			if ( GlobalSelectionSystem().Mode() == SelectionSystem::ePrimitive ){
 				if( g_modifiers == c_modifierAlt ){
 					if( view.fill() ){ // alt resize
-						Plane3 plane( 0, 0, 0, 0 );
-						Vector3 intersectionPoint( FLT_MAX, FLT_MAX, FLT_MAX );
-						Scene_forEachPlaneSelectable_bestPlane( test, plane, intersectionPoint );
-
-						if( plane3_valid( plane ) ){
-							auto gatherPolygonsByPlane = [plane, &polygons]( PlaneSelectable& planeSelectable ){
+						if( const auto planeData = Scene_forEachPlaneSelectable_bestPlane( test ); planeData.valid() ){
+							auto gatherPolygonsByPlane = [plane = planeData.m_plane, &polygons]( PlaneSelectable& planeSelectable ){
 								planeSelectable.gatherPolygonsByPlane( plane, polygons );
 							};
 							Scene_forEachVisibleSelectedPlaneselectable( gatherPolygonsByPlane );
@@ -4590,12 +4536,8 @@ public:
 						Scene_forEachVisibleSelectedComponentSelectionTestable( gatherComponentsHighlight );
 
 						if( polygons.empty() ){
-							Plane3 plane( 0, 0, 0, 0 );
-							Vector3 intersectionPoint( FLT_MAX, FLT_MAX, FLT_MAX );
-							Scene_forEachSelectedBrush_bestPlane( test, plane, intersectionPoint );
-
-							if( plane3_valid( plane ) ){
-								auto gatherPolygonsByPlane = [plane, &polygons]( BrushInstance& brushInstance ){
+							if( const auto planeData = Scene_forEachSelectedBrush_bestPlane( test ); planeData.valid() ){
+								auto gatherPolygonsByPlane = [plane = planeData.m_plane, &polygons]( BrushInstance& brushInstance ){
 									brushInstance.gatherPolygonsByPlane( plane, polygons );
 								};
 								Scene_forEachVisibleSelectedBrush( gatherPolygonsByPlane );
@@ -4604,7 +4546,9 @@ public:
 					}
 				}
 			}
-			else{ // components
+			else if( g_modifiers == c_modifierNone // components
+				|| g_modifiers == c_modifierShift // hack: these respect to the RadiantSelectionSystem::SelectPoint
+				|| ( g_modifiers == c_modifierControl && GlobalSelectionSystem().ComponentMode() == SelectionSystem::EComponentMode::eFace ) ){
 				SelectionIntersection intersection;
 				const SelectionSystem::EComponentMode mode = GlobalSelectionSystem().ComponentMode();
 				auto gatherComponentsHighlight = [&polygons, &intersection, &test, mode]( const ComponentSelectionTestable& componentSelectionTestable ){
@@ -4826,6 +4770,9 @@ public:
 		return false;
 	}
 	void testSelect( const View& view, const Matrix4& pivot2world ) override {
+		if( g_modifiers != c_modifierNone && !quickCondition( g_modifiers, view ) )
+			return selectionChange( nullptr );
+
 		testSelect_points( view );
 		if( !isSelected() ){
 			if( view.fill() ){
@@ -4852,6 +4799,9 @@ public:
 			}
 	}
 	void testSelect_points( const View& view ) {
+		if( g_modifiers != c_modifierNone && !quickCondition( g_modifiers, view ) )
+			return selectionChange( nullptr );
+
 		SelectionPool selector;
 		{
 			const Matrix4 local2view( view.GetViewMatrix() );
@@ -4898,9 +4848,10 @@ public:
 		m_dragXY_Z.set0( transform_origin );
 		m_dragXY_Z.Construct( device2manip, device_point, AABB( transform_origin, g_vector3_identity ), transform_origin );
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
-		if( ( snap || snapbbox || alt || !m_view->fill() ) && !SnapBounds::useCondition( snapbbox, *m_view ) )
-			return m_dragXY_Z.Transform( manip2object, device2manip, device_point, snap, snapbbox, alt );
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
+		// any 2D or 3D with modifiers besides SnapBounds
+		if( !( g_modifiers == c_modifierNone && m_view->fill() ) && !SnapBounds::useCondition( g_modifiers, *m_view ) )
+			return m_dragXY_Z.Transform( manip2object, device2manip, device_point );
 
 		View scissored( *m_view );
 		ConstructSelectionTest( scissored, SelectionBoxForPoint( device_point, m_device_epsilon ) );
@@ -4925,6 +4876,10 @@ public:
 	}
 	bool isSelected() const override {
 		return m_points[0].isSelected() || m_points[1].isSelected() || m_points[2].isSelected();
+	}
+
+	static bool quickCondition( const ModifierFlags& modifiers, const View& view ){
+		return modifiers == c_modifierControl && !view.fill();
 	}
 };
 Shader* ClipManipulator::m_state;
@@ -5000,7 +4955,7 @@ public:
 	void Construct( const Matrix4& device2manip, const DeviceVector device_point, const AABB& bounds, const Vector3& transform_origin ) override {
 		//do things with undo
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 	}
 
 	Manipulatable* GetManipulatable() override {
@@ -5678,6 +5633,12 @@ public:
 		}
 
 		UVSelector selector;
+
+		if( g_modifiers == c_modifierAlt ) // only try skew with alt // note also grabs eTex
+			goto testSelectUVlines;
+		if( g_modifiers != c_modifierNone )
+			return applySelection( selector.m_selection, nullptr, nullptr, selector.m_index );
+
 		{	// try pivot point
 			const Matrix4 local2view( matrix4_multiplied_by_matrix4( view.GetViewMatrix(), m_pivot2world ) );
 			SelectionIntersection best;
@@ -5734,7 +5695,7 @@ public:
 			Line_BestPoint( local2view, &m_pivotLines.m_lines[2], best );
 			selector.addIntersection( best, ePivotV );
 		}
-
+testSelectUVlines:
 		PointVertex* selectedU = 0;
 		PointVertex* selectedV = 0;
 		EUVSelection& selection = selector.m_selection;
@@ -6001,7 +5962,7 @@ private:
 	void commitTransform( const Matrix4& transform ) const {
 		if( m_face ){
 			m_face->transform_texdef( transform, m_origin ); //! todo make SI update after Brush_textureChanged(); same problem after brush moved with tex lock
-		}
+		} // also after Patch_textureChanged(); calling them now in this->freezeTransform() works good nuff
 		else if( m_patch ){
 			const Matrix4 uvTransform = transform_local2object( matrix4_affine_inverse( transform ), m_faceLocal2tex, m_faceTex2local );
 			for( std::size_t i = 0; i < m_patchCtrl.size(); ++i ){
@@ -6021,8 +5982,10 @@ public:
 	}
 	//!? fix meaningless undo on grid/origin change, then click tex or lines
 	//!? todo no snap mode with alt modifier
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapHard, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		const Vector3 current = point_on_plane( m_plane, m_view->GetViewMatrix(), device_point );
+
+		const bool snap = g_modifiers.shift(), snapHard = g_modifiers.ctrl();
 
 		const class Snapper
 		{
@@ -6690,10 +6653,14 @@ public:
 		 || m_selection == ePatchRow
 		 || m_selection == ePatchColumn )
 		{
-			if( m_face )
+			if( m_face ){
 				m_face->freezeTransform();
-			else if( m_patch )
+				Brush_textureChanged();
+			}
+			else if( m_patch ){
 				m_patch->freezeTransform();
+				Patch_textureChanged();
+			}
 		}
 	}
 
@@ -6733,14 +6700,14 @@ public:
 	void Construct( const Matrix4& device2manip, const DeviceVector device_point, const AABB& bounds, const Vector3& transform_origin ) override {
 		m_start = point_on_plane( device2manip, device_point );
 	}
-	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point, const bool snap, const bool snapbbox, const bool alt ) override {
+	void Transform( const Matrix4& manip2object, const Matrix4& device2manip, const DeviceVector device_point ) override {
 		Vector3 current = point_on_plane( device2manip, device_point );
 		current = vector3_subtracted( current, m_start );
 
-		if( snap ){
+		if( g_modifiers.shift() ){ // snap to axis
 			for ( std::size_t i = 0; i < 3; ++i ){
-				if( fabs( current[i] ) >= fabs( current[(i + 1) % 3] ) ){
-					current[(i + 1) % 3] = 0.f;
+				if( fabs( current[i] ) >= fabs( current[( i + 1 ) % 3] ) ){
+					current[( i + 1 ) % 3] = 0.f;
 				}
 				else{
 					current[i] = 0.f;
@@ -6813,6 +6780,9 @@ public:
 		renderer.addRenderable( m_point, m_pivot.m_worldSpace );
 	}
 	void testSelect( const View& view, const Matrix4& pivot2world ) override {
+		if( g_modifiers != c_modifierNone )
+			return selectionChange( nullptr );
+
 		m_pivot.update( pivot2world, view.GetModelview(), view.GetProjection(), view.GetViewport() );
 
 		SelectionPool selector;
@@ -6845,6 +6815,37 @@ public:
 	}
 };
 Shader* TransformOriginManipulator::m_state;
+
+class TransformsObserved : public Transforms
+{
+public:
+	void setTranslation( const Translation& value ){
+		Transforms::setTranslation( value );
+		m_changedCallbacks[SelectionSystem::eTranslate]( StringStream<64>( m_translation == c_translation_identity? ' ' : 'x',
+			" Translate ", m_translation.x(), ' ', m_translation.y(), ' ', m_translation.z() ) );
+	}
+	void setRotation( const Rotation& value ){
+		Transforms::setRotation( value );
+		m_changedCallbacks[SelectionSystem::eRotate]( StringStream<64>( m_rotation == c_rotation_identity? ' ' : 'x',
+			" Rotate ", m_rotation.x(), ' ', m_rotation.y(), ' ', m_rotation.z() ) );
+	}
+	void setScale( const Scale& value ){
+		Transforms::setScale( value );
+		m_changedCallbacks[SelectionSystem::eScale]( StringStream<64>( m_scale == c_scale_identity? ' ' : 'x',
+			" Scale ", m_scale.x(), ' ', m_scale.y(), ' ', m_scale.z() ) );
+	}
+	void setSkew( const Skew& value ){
+		Transforms::setSkew( value );
+		m_changedCallbacks[SelectionSystem::eSkew]( StringStream<64>( m_skew == c_skew_identity? ' ' : 'x',
+			" Skew ", m_skew.index, ' ', m_skew.amount ) );
+	}
+
+	std::array<Callback<void(const char*)>, 4> m_changedCallbacks;
+	static_assert( SelectionSystem::eTranslate == 0
+	            && SelectionSystem::eRotate == 1
+				&& SelectionSystem::eScale == 2
+				&& SelectionSystem::eSkew == 3 );
+};
 
 class select_all : public scene::Graph::Walker
 {
@@ -7009,11 +7010,11 @@ public:
 		m_lazy_bounds.setInvalid();
 		SceneChangeNotify();
 	}
-	typedef ConstMemberCaller<RadiantSelectionSystem, &RadiantSelectionSystem::pivotChanged> PivotChangedCaller;
+	typedef ConstMemberCaller<RadiantSelectionSystem, void(), &RadiantSelectionSystem::pivotChanged> PivotChangedCaller;
 	void pivotChangedSelection( const Selectable& selectable ){
 		pivotChanged();
 	}
-	typedef MemberCaller1<RadiantSelectionSystem, const Selectable&, &RadiantSelectionSystem::pivotChangedSelection> PivotChangedSelectionCaller;
+	typedef MemberCaller<RadiantSelectionSystem, void(const Selectable&), &RadiantSelectionSystem::pivotChangedSelection> PivotChangedSelectionCaller;
 
 	const AABB& getBoundsSelected() const override {
 		return m_lazy_bounds.getBounds();
@@ -7050,7 +7051,7 @@ public:
 		case eScale: m_manipulator = &m_scale_manipulator; break;
 		case eSkew: m_manipulator = &m_skew_manipulator; break;
 		case eDrag: m_manipulator = &m_drag_manipulator; break;
-		case eClip: m_manipulator = &m_clip_manipulator; m_repeatableTransforms.setIdentity(); break;
+		case eClip: m_manipulator = &m_clip_manipulator; resetTransforms( eClip ); break;
 		case eBuild:
 			{
 				m_build_manipulator.initialise();
@@ -7066,11 +7067,11 @@ public:
 
 	SelectionChangeCallback getObserver( EMode mode ) override {
 		if ( mode == ePrimitive ) {
-			return makeCallback1( m_count_primitive );
+			return makeCallback( m_count_primitive );
 		}
 		else
 		{
-			return makeCallback1( m_count_component );
+			return makeCallback( m_count_component );
 		}
 	}
 	std::size_t countSelected() const override {
@@ -7152,7 +7153,7 @@ public:
 	void selectionChanged( const Selectable& selectable ){
 		m_selectionChanged_callbacks( selectable );
 	}
-	typedef MemberCaller1<RadiantSelectionSystem, const Selectable&, &RadiantSelectionSystem::selectionChanged> SelectionChangedCaller;
+	typedef MemberCaller<RadiantSelectionSystem, void(const Selectable&), &RadiantSelectionSystem::selectionChanged> SelectionChangedCaller;
 
 
 	void startMove(){
@@ -7162,7 +7163,11 @@ public:
 	bool SelectManipulator( const View& view, const DeviceVector device_point, const DeviceVector device_epsilon ){
 		bool movingOrigin = false;
 
-		if ( !nothingSelected() || ManipulatorMode() == eDrag || ManipulatorMode() == eClip || ManipulatorMode() == eBuild || ManipulatorMode() == eUV ) {
+		if ( !nothingSelected()
+		|| ManipulatorMode() == eDrag
+		|| ManipulatorMode() == eClip
+		|| ManipulatorMode() == eBuild
+		|| ManipulatorMode() == eUV ) {
 #if defined ( DEBUG_SELECTION )
 			g_render_clipped.destroy();
 #endif
@@ -7215,10 +7220,10 @@ public:
 		Manipulatable::assign_static( view, device_point, device_epsilon ); //this b4 m_manipulator calls!
 
 		if ( ( !nothingSelected() && transformOrigin_isTranslatable() )
+		     || ManipulatorMode() == eDrag
 		     || ManipulatorMode() == eClip
 		     || ManipulatorMode() == eBuild
-		     || ManipulatorMode() == eUV
-		     || ManipulatorMode() == eDrag ) {
+		     || ManipulatorMode() == eUV ) {
 #if defined ( DEBUG_SELECTION )
 			g_render_clipped.destroy();
 #endif
@@ -7275,23 +7280,20 @@ public:
 #define SELECT_MATCHING_COMPONENTS_DIST .25f
 	void SelectionPool_Select( SelectionPool& pool, bool select, float dist_epsilon ){
 		SelectionPool::iterator best = pool.begin();
-		if( ( *best ).second->isSelected() != select ){
-			( *best ).second->setSelected( select );
+		if( best->second->isSelected() != select ){
+			best->second->setSelected( select );
 		}
 #ifdef SELECT_MATCHING
-		SelectionPool::iterator i = best;
-		++i;
-		while ( i != pool.end() )
+		for ( SelectionPool::iterator i = std::next( best ); i != pool.end(); ++i )
 		{
-			if( ( *i ).first.equalEpsilon( ( *best ).first, dist_epsilon, SELECT_MATCHING_DEPTH ) ){
-				//if( ( *i ).second->isSelected() != select ){
-				( *i ).second->setSelected( select );
+			if( i->first.equalEpsilon( best->first, dist_epsilon, SELECT_MATCHING_DEPTH ) ){
+				//if( i->second->isSelected() != select ){
+				i->second->setSelected( select );
 				//}
 			}
 			else{
 				break;
 			}
-			++i;
 		}
 #endif // SELECT_MATCHING
 	}
@@ -7319,31 +7321,27 @@ public:
 
 			SelectionVolume volume( scissored );
 			SelectionPool selector;
-			SelectionPool selector_point_ents;
 			const bool prefer_point_ents = m_bPreferPointEntsIn2D && Mode() == ePrimitive && !view.fill() && !face
-			                               && ( modifier == RadiantSelectionSystem::eReplace || modifier == RadiantSelectionSystem::eSelect || modifier == RadiantSelectionSystem::eDeselect );
+			                               && ( modifier == EModifier::eReplace || modifier == EModifier::eSelect || modifier == EModifier::eDeselect );
 
-			if( prefer_point_ents ){
-				Scene_TestSelect( selector_point_ents, volume, scissored, eEntity, ComponentMode() );
-			}
-			if( prefer_point_ents && !selector_point_ents.failed() ){
+			if( prefer_point_ents && ( Scene_TestSelect( selector, volume, scissored, eEntity, ComponentMode() ), !selector.failed() ) ){
 				switch ( modifier )
 				{
 				// if cycle mode not enabled, enable it
-				case RadiantSelectionSystem::eReplace:
+				case EModifier::eReplace:
 					{
 						// select closest
-						( *selector_point_ents.begin() ).second->setSelected( true );
+						selector.begin()->second->setSelected( true );
 					}
 					break;
-				case RadiantSelectionSystem::eSelect:
+				case EModifier::eSelect:
 					{
-						SelectionPool_Select( selector_point_ents, true, SELECT_MATCHING_DIST );
+						SelectionPool_Select( selector, true, SELECT_MATCHING_DIST );
 					}
 					break;
-				case RadiantSelectionSystem::eDeselect:
+				case EModifier::eDeselect:
 					{
-						SelectionPool_Select( selector_point_ents, false, SELECT_MATCHING_DIST );
+						SelectionPool_Select( selector, false, SELECT_MATCHING_DIST );
 					}
 					break;
 				default:
@@ -7351,31 +7349,31 @@ public:
 				}
 			}
 			else{
+				const EMode mode = g_modifiers == c_modifierAlt? ePrimitive : Mode();
 				if ( face ){
 					Scene_TestSelect_Component( selector, volume, scissored, eFace );
 				}
 				else{
-					Scene_TestSelect( selector, volume, scissored, g_modifiers == c_modifierAlt? ePrimitive : Mode(), ComponentMode() );
+					Scene_TestSelect( selector, volume, scissored, mode, ComponentMode() );
 				}
 
 				if ( !selector.failed() ) {
 					switch ( modifier )
 					{
 					// if cycle mode not enabled, enable it
-					case RadiantSelectionSystem::eReplace:
+					case EModifier::eReplace:
 						{
 							// select closest
-							( *selector.begin() ).second->setSelected( true );
+							selector.begin()->second->setSelected( true );
 						}
 						break;
 					// select the next object in the list from the one already selected
-					case RadiantSelectionSystem::eCycle:
+					case EModifier::eCycle:
 						{
 							bool cycleSelectionOccured = false;
-							SelectionPool::iterator i = selector.begin();
-							while ( i != selector.end() )
+							for ( SelectionPool::iterator i = selector.begin(); i != selector.end(); ++i )
 							{
-								if ( ( *i ).second->isSelected() ) {
+								if ( i->second->isSelected() ) {
 									deselectComponentsOrAll( face );
 									++i;
 									if ( i != selector.end() ) {
@@ -7388,22 +7386,22 @@ public:
 									cycleSelectionOccured = true;
 									break;
 								}
-								++i;
 							}
 							if( !cycleSelectionOccured ){
 								deselectComponentsOrAll( face );
-								( *selector.begin() ).second->setSelected( true );
+								selector.begin()->second->setSelected( true );
 							}
 						}
 						break;
-					case RadiantSelectionSystem::eSelect:
+					case EModifier::eSelect:
 						{
-							SelectionPool_Select( selector, true, ( Mode() == eComponent && g_modifiers != c_modifierAlt )? SELECT_MATCHING_COMPONENTS_DIST : SELECT_MATCHING_DIST );
+							SelectionPool_Select( selector, true, mode == eComponent? SELECT_MATCHING_COMPONENTS_DIST : SELECT_MATCHING_DIST );
 						}
 						break;
-					case RadiantSelectionSystem::eDeselect:
+					case EModifier::eDeselect:
 						{
-							SelectionPool_Select( selector, false, ( Mode() == eComponent && g_modifiers != c_modifierAlt )? SELECT_MATCHING_COMPONENTS_DIST : SELECT_MATCHING_DIST );
+							if( !( mode == ePrimitive && Mode() == eComponent && countSelected() == 1 ) ) // don't deselect only primitive in component mode
+								SelectionPool_Select( selector, false, mode == eComponent? SELECT_MATCHING_COMPONENTS_DIST : SELECT_MATCHING_DIST );
 						}
 						break;
 					default:
@@ -7417,7 +7415,8 @@ public:
 		}
 	}
 
-	bool SelectPoint_InitPaint( const View& view, const DeviceVector device_point, const DeviceVector device_epsilon, bool face ){
+	RadiantSelectionSystem::EModifier
+	SelectPoint_InitPaint( const View& view, const DeviceVector device_point, const DeviceVector device_epsilon, bool face ){
 		ASSERT_MESSAGE( fabs( device_point[0] ) <= 1.f && fabs( device_point[1] ) <= 1.f, "point-selection error" );
 #if defined ( DEBUG_SELECTION )
 		g_render_clipped.destroy();
@@ -7429,27 +7428,25 @@ public:
 
 			SelectionVolume volume( scissored );
 			SelectionPool selector;
-			SelectionPool selector_point_ents;
 			const bool prefer_point_ents = m_bPreferPointEntsIn2D && Mode() == ePrimitive && !view.fill() && !face;
 
-			if( prefer_point_ents ){
-				Scene_TestSelect( selector_point_ents, volume, scissored, eEntity, ComponentMode() );
-			}
-			if( prefer_point_ents && !selector_point_ents.failed() ){
-				const bool wasSelected = ( *selector_point_ents.begin() ).second->isSelected();
-				SelectionPool_Select( selector_point_ents, !wasSelected, SELECT_MATCHING_DIST );
-				return !wasSelected;
+			if( prefer_point_ents && ( Scene_TestSelect( selector, volume, scissored, eEntity, ComponentMode() ), !selector.failed() ) ){
+				const bool wasSelected = selector.begin()->second->isSelected();
+				SelectionPool_Select( selector, !wasSelected, SELECT_MATCHING_DIST );
+				return wasSelected? eDeselect : eSelect;
 			}
 			else{//do primitives, if ents failed
+				const EMode mode = g_modifiers == c_modifierAlt? ePrimitive : Mode();
 				if ( face ){
 					Scene_TestSelect_Component( selector, volume, scissored, eFace );
 				}
 				else{
-					Scene_TestSelect( selector, volume, scissored, g_modifiers == c_modifierAlt? ePrimitive : Mode(), ComponentMode() );
+					Scene_TestSelect( selector, volume, scissored, mode, ComponentMode() );
 				}
 				if ( !selector.failed() ){
-					const bool wasSelected = ( *selector.begin() ).second->isSelected();
-					SelectionPool_Select( selector, !wasSelected, ( Mode() == eComponent && g_modifiers != c_modifierAlt )? SELECT_MATCHING_COMPONENTS_DIST : SELECT_MATCHING_DIST );
+					const bool wasSelected = selector.begin()->second->isSelected();
+					if( !( mode == ePrimitive && Mode() == eComponent && countSelected() == 1 && wasSelected ) ) // don't deselect only primitive in component mode
+						SelectionPool_Select( selector, !wasSelected, mode == eComponent? SELECT_MATCHING_COMPONENTS_DIST : SELECT_MATCHING_DIST );
 
 #if 0
 					SelectionPool::iterator best = selector.begin();
@@ -7463,10 +7460,10 @@ public:
 					}
 #endif
 
-					return !wasSelected;
+					return wasSelected? eDeselect : eSelect;
 				}
 				else{
-					return true;
+					return eSelect;
 				}
 			}
 		}
@@ -7498,7 +7495,7 @@ public:
 
 	void translate( const Vector3& translation ) override {
 		if ( !nothingSelected() ) {
-			//ASSERT_MESSAGE(!m_pivotChanged, "pivot is invalid");
+			//ASSERT_MESSAGE( !m_pivotChanged, "pivot is invalid" );
 
 			m_translation = translation;
 			m_repeatableTransforms.setTranslation( translation );
@@ -7522,7 +7519,7 @@ public:
 	}
 	void rotate( const Quaternion& rotation ) override {
 		if ( !nothingSelected() ) {
-			//ASSERT_MESSAGE(!m_pivotChanged, "pivot is invalid");
+			//ASSERT_MESSAGE( !m_pivotChanged, "pivot is invalid" );
 
 			m_rotation = rotation;
 			m_repeatableTransforms.setRotation( rotation );
@@ -7624,17 +7621,29 @@ public:
 		freezeTransforms();
 	}
 
-	Transforms m_repeatableTransforms;
+	TransformsObserved m_repeatableTransforms;
 
-	void repeatTransforms( const Callback& clone ) override {
+	void repeatTransforms() override {
+		extern void Scene_Clone_Selected();
 		if ( !nothingSelected() && !m_repeatableTransforms.isIdentity() ) {
 			startMove();
 			UndoableCommand undo( "repeatTransforms" );
 			if( Mode() == ePrimitive )
-				clone();
+				Scene_Clone_Selected();
 			alltransform( m_repeatableTransforms, m_pivot2world.t().vec3() );
 			freezeTransforms();
 		}
+	}
+	void resetTransforms( EManipulatorMode which ) override {
+		const bool all = ( which != eTranslate && which != eRotate && which != eScale && which != eSkew );
+		if( which == eTranslate || all )
+			m_repeatableTransforms.setTranslation( c_translation_identity );
+		if( which == eRotate || all )
+			m_repeatableTransforms.setRotation( c_rotation_identity );
+		if( which == eScale || all )
+			m_repeatableTransforms.setScale( c_scale_identity );
+		if( which == eSkew || all )
+			m_repeatableTransforms.setSkew( c_skew_identity );
 	}
 
 	bool transformOrigin_isTranslatable() const {
@@ -7650,7 +7659,7 @@ public:
 		SceneChangeNotify();
 	}
 
-	void MoveSelected( const View& view, const DeviceVector device_point, bool snap, bool snapbbox, bool alt ){
+	void MoveSelected( const View& view, const DeviceVector device_point ){
 		if ( m_manipulator->isSelected() ) {
 			if ( !m_undo_begun ) {
 				m_undo_begun = true;
@@ -7659,27 +7668,27 @@ public:
 
 			Matrix4 device2manip;
 			ConstructDevice2Manip( device2manip, m_pivot2world_start, view.GetModelview(), view.GetProjection(), view.GetViewport() );
-			m_manipulator->GetManipulatable()->Transform( m_manip2pivot_start, device2manip, device_point, snap, snapbbox, alt );
+			m_manipulator->GetManipulatable()->Transform( m_manip2pivot_start, device2manip, device_point );
 		}
 		else if( m_transformOrigin_manipulator.isSelected() ){
 			Matrix4 device2manip;
 			ConstructDevice2Manip( device2manip, m_pivot2world_start, view.GetModelview(), view.GetProjection(), view.GetViewport() );
-			m_transformOrigin_manipulator.GetManipulatable()->Transform( m_manip2pivot_start, device2manip, device_point, snap, snapbbox, alt );
+			m_transformOrigin_manipulator.GetManipulatable()->Transform( m_manip2pivot_start, device2manip, device_point );
 		}
 	}
 
-/// \todo Support view-dependent nudge.
+	/// \todo Support view-dependent nudge.
 	void NudgeManipulator( const Vector3& nudge, const Vector3& view ) override {
-//	if ( ManipulatorMode() == eTranslate || ManipulatorMode() == eDrag ) {
+	//	if ( ManipulatorMode() == eTranslate || ManipulatorMode() == eDrag ) {
 		translateSelected( nudge );
-//	}
+	//	}
 	}
 
 	bool endMove();
 	void freezeTransforms();
 
-	void renderSolid( Renderer& renderer, const VolumeTest& volume ) const;
-	void renderWireframe( Renderer& renderer, const VolumeTest& volume ) const {
+	void renderSolid( Renderer& renderer, const VolumeTest& volume ) const override;
+	void renderWireframe( Renderer& renderer, const VolumeTest& volume ) const override {
 		renderSolid( renderer, volume );
 	}
 
@@ -7870,9 +7879,9 @@ void RadiantSelectionSystem::Scene_TestSelect( Selector& selector, SelectionTest
 }
 
 
-void Scene_Intersect( const View& view, const float device_point[2], const float device_epsilon[2], Vector3& intersection ){
+void Scene_Intersect( const View& view, const Vector2& device_point, const Vector2& device_epsilon, Vector3& intersection ){
 	View scissored( view );
-	ConstructSelectionTest( scissored, SelectionBoxForPoint( DeviceVector( device_point[0], device_point[1] ), DeviceVector( device_epsilon[0], device_epsilon[1] ) ) );
+	ConstructSelectionTest( scissored, SelectionBoxForPoint( device_point, device_epsilon ) );
 	SelectionVolume test( scissored );
 
 	BestPointSelector bestPointSelector;
@@ -8186,7 +8195,7 @@ AABB RadiantSelectionSystem::getSelectionAABB() const {
 }
 
 void RadiantSelectionSystem::renderSolid( Renderer& renderer, const VolumeTest& volume ) const {
-	//if(view->TestPoint(m_object_pivot))
+	//if( view->TestPoint( m_object_pivot ) )
 	if ( !nothingSelected()
 	     || ManipulatorMode() == eClip
 	     || ManipulatorMode() == eBuild
@@ -8233,9 +8242,13 @@ void SelectionSystem_constructPage( PreferenceGroup& group ){
 	SelectionSystem_constructPreferences( page );
 }
 void SelectionSystem_registerPreferencesPage(){
-	PreferencesDialog_addSettingsPage( FreeCaller1<PreferenceGroup&, SelectionSystem_constructPage>() );
+	PreferencesDialog_addSettingsPage( makeCallbackF( SelectionSystem_constructPage ) );
 }
 
+
+void SelectionSystem_connectTransformsCallbacks( const std::array<Callback<void(const char*)>, 4>& callbacks ){
+	getSelectionSystem().m_repeatableTransforms.m_changedCallbacks = callbacks;
+}
 
 
 void SelectionSystem_OnBoundsChanged(){
@@ -8249,7 +8262,7 @@ void SelectionSystem_Construct(){
 
 	g_RadiantSelectionSystem = new RadiantSelectionSystem;
 
-	SelectionSystem_boundsChanged = GlobalSceneGraph().addBoundsChangedCallback( FreeCaller<SelectionSystem_OnBoundsChanged>() );
+	SelectionSystem_boundsChanged = GlobalSceneGraph().addBoundsChangedCallback( FreeCaller<void(), SelectionSystem_OnBoundsChanged>() );
 
 	GlobalShaderCache().attachRenderable( getSelectionSystem() );
 
@@ -8282,7 +8295,7 @@ inline DeviceVector window_to_normalised_device( WindowVector window, std::size_
 }
 
 inline float device_constrained( float pos ){
-	return std::min( 1.0f, std::max( -1.0f, pos ) );
+	return std::clamp( pos, -1.0f, 1.0f );
 }
 
 inline DeviceVector device_constrained( DeviceVector device ){
@@ -8290,14 +8303,14 @@ inline DeviceVector device_constrained( DeviceVector device ){
 }
 
 inline float window_constrained( float pos, std::size_t origin, std::size_t size ){
-	return std::min( static_cast<float>( origin + size ), std::max( static_cast<float>( origin ), pos ) );
+	return std::clamp( pos, static_cast<float>( origin ), static_cast<float>( origin + size ) );
 }
 
 inline WindowVector window_constrained( WindowVector window, std::size_t x, std::size_t y, std::size_t width, std::size_t height ){
 	return WindowVector( window_constrained( window.x(), x, width ), window_constrained( window.y(), y, height ) );
 }
 
-typedef Callback1<DeviceVector> MouseEventCallback;
+typedef Callback<void(DeviceVector)> MouseEventCallback;
 
 Single<MouseEventCallback> g_mouseMovedCallback;
 Single<MouseEventCallback> g_mouseUpCallback;
@@ -8334,14 +8347,12 @@ const char* Scene_applyClosestTexture_getUndoName( bool shift, bool ctrl, bool a
 class TexManipulator_
 {
 	const DeviceVector& m_epsilon;
-	const ModifierFlags& m_state;
 public:
 	const View* m_view;
 	bool m_undo_begun;
 
-	TexManipulator_( const DeviceVector& epsilon, const ModifierFlags& state ) :
+	TexManipulator_( const DeviceVector& epsilon ) :
 		m_epsilon( epsilon ),
-		m_state( state ),
 		m_undo_begun( false ){
 	}
 
@@ -8350,15 +8361,13 @@ public:
 		ConstructSelectionTest( scissored, SelectionBoxForPoint( position, m_epsilon ) );
 		SelectionVolume volume( scissored );
 
-		if( m_state == c_modifier_copy_texture ) {
+		if( g_modifiers == c_modifier_copy_texture ) {
 			Scene_copyClosestTexture( volume );
 		}
 		else{
 			m_undo_begun = true;
 			GlobalUndoSystem().start();
-			Scene_applyClosestTexture( volume, bitfield_enabled( m_state, c_modifierShift ),
-			                                   bitfield_enabled( m_state, c_modifierControl ),
-			                                   bitfield_enabled( m_state, c_modifierAlt ), true );
+			Scene_applyClosestTexture( volume, g_modifiers.shift(), g_modifiers.ctrl(), g_modifiers.alt(), true );
 		}
 	}
 
@@ -8368,83 +8377,64 @@ public:
 			ConstructSelectionTest( scissored, SelectionBoxForPoint( device_constrained( position ), m_epsilon ) );
 			SelectionVolume volume( scissored );
 
-			Scene_applyClosestTexture( volume, bitfield_enabled( m_state, c_modifierShift ),
-			                                   bitfield_enabled( m_state, c_modifierControl ),
-			                                   bitfield_enabled( m_state, c_modifierAlt ) );
+			Scene_applyClosestTexture( volume, g_modifiers.shift(), g_modifiers.ctrl(), g_modifiers.alt() );
 		}
 	}
-	typedef MemberCaller1<TexManipulator_, DeviceVector, &TexManipulator_::mouseMoved> MouseMovedCaller;
+	typedef MemberCaller<TexManipulator_, void(DeviceVector), &TexManipulator_::mouseMoved> MouseMovedCaller;
 
 	void mouseUp( DeviceVector position ){
 		if( m_undo_begun ){
-			GlobalUndoSystem().finish( Scene_applyClosestTexture_getUndoName( bitfield_enabled( m_state, c_modifierShift ),
-			                                                                  bitfield_enabled( m_state, c_modifierControl ),
-			                                                                  bitfield_enabled( m_state, c_modifierAlt ) ) );
+			GlobalUndoSystem().finish( Scene_applyClosestTexture_getUndoName( g_modifiers.shift(), g_modifiers.ctrl(), g_modifiers.alt() ) );
 			m_undo_begun = false;
 		}
-		g_mouseMovedCallback.clear();
-		g_mouseUpCallback.clear();
 	}
-	typedef MemberCaller1<TexManipulator_, DeviceVector, &TexManipulator_::mouseUp> MouseUpCaller;
+	typedef MemberCaller<TexManipulator_, void(DeviceVector), &TexManipulator_::mouseUp> MouseUpCaller;
 };
 
 
 class Selector_
 {
-	RadiantSelectionSystem::EModifier modifier_for_state( ModifierFlags state ){
-		if ( ( state == c_modifier_toggle || state == c_modifier_toggle_face || state == c_modifier_face )
-		     && m_mouse2 )
-			return RadiantSelectionSystem::eReplace;
-		else
-			return RadiantSelectionSystem::eManipulator;
+	bool m1selecting() const {
+		return !m_mouse2 && ( g_modifiers == c_modifier_toggle || g_modifiers == c_modifier_face
+		|| ( g_modifiers == c_modifierAlt && getSelectionSystem().Mode() == SelectionSystem::eComponent ) ); // select primitives in component mode
+	}
+	bool m2selecting() const {
+		return m_mouse2 && ( g_modifiers == c_modifier_toggle || g_modifiers == c_modifier_face );
+	}
+
+	RadiantSelectionSystem::EModifier modifier_for_mouseMoved() const {
+		return m_mouseMoved
+		       ? RadiantSelectionSystem::eReplace
+	           : RadiantSelectionSystem::eCycle;
+	}
+	RadiantSelectionSystem::EModifier modifier_for_state() const {
+		return m2selecting()
+		       ? modifier_for_mouseMoved()
+		       : RadiantSelectionSystem::eManipulator;
 	}
 
 	rect_t getDeviceArea() const {
 		const DeviceVector delta( m_current - m_start );
-		if ( m_mouseMovedWhilePressed && selecting() && delta.x() != 0 && delta.y() != 0 )
-			return SelectionBoxForArea( &m_start[0], &delta[0] );
+		if ( m_mouseMovedWhilePressed && m2selecting() && delta.x() != 0 && delta.y() != 0 )
+			return SelectionBoxForArea( m_start, delta );
 		else
 			return rect_t();
-	}
-
-	const DeviceVector& m_epsilon;
-	ModifierFlags m_state;
-public:
-	DeviceVector m_start;
-	DeviceVector m_current;
-	bool m_mouse2;
-	bool m_mouseMoved;
-	bool m_mouseMovedWhilePressed;
-	bool m_paintSelect;
-	const View* m_view;
-	RectangleCallback m_window_update;
-
-	Selector_( const DeviceVector& epsilon ) :
-		m_epsilon( epsilon ),
-		m_state( c_modifierNone ),
-		m_start( 0.f, 0.f ),
-		m_current( 0.f, 0.f ),
-		m_mouse2( false ),
-		m_mouseMoved( false ),
-		m_mouseMovedWhilePressed( false ){
 	}
 
 	void draw_area(){
 		m_window_update( getDeviceArea() );
 	}
 
-	void testSelect( DeviceVector position ){
-		RadiantSelectionSystem::EModifier modifier = modifier_for_state( m_state );
+	void m2testSelect( DeviceVector position ){
+		const RadiantSelectionSystem::EModifier modifier = modifier_for_state();
 		if ( modifier != RadiantSelectionSystem::eManipulator ) {
 			const DeviceVector delta( position - m_start );
-			if ( m_mouseMovedWhilePressed && delta.x() != 0 && delta.y() != 0 ) {
-				getSelectionSystem().SelectArea( *m_view, SelectionBoxForArea( &m_start[0], &delta[0] ), ( m_state & c_modifier_face ) != c_modifierNone );
+			if ( m_mouseMovedWhilePressed ) {
+				if( delta.x() != 0 && delta.y() != 0 )
+					getSelectionSystem().SelectArea( *m_view, SelectionBoxForArea( m_start, delta ), g_modifiers == c_modifier_face );
 			}
-			else if( !m_mouseMovedWhilePressed ){
-				if ( modifier == RadiantSelectionSystem::eReplace && !m_mouseMoved ) {
-					modifier = RadiantSelectionSystem::eCycle;
-				}
-				getSelectionSystem().SelectPoint( *m_view, position, m_epsilon, modifier, ( m_state & c_modifier_face ) != c_modifierNone );
+			else{
+				getSelectionSystem().SelectPoint( *m_view, position, m_epsilon, modifier, g_modifiers == c_modifier_face );
 			}
 		}
 
@@ -8452,27 +8442,35 @@ public:
 		draw_area();
 	}
 
+	const DeviceVector& m_epsilon;
+public:
+	DeviceVector m_start;
+	DeviceVector m_current;
+	bool m_mouse2;
+	bool m_mouseMoved;
+	bool m_mouseMovedWhilePressed;
+	RadiantSelectionSystem::EModifier m_paintMode;
+	const View* m_view;
+	RectangleCallback m_window_update;
+
+	Selector_( const DeviceVector& epsilon ) :
+		m_epsilon( epsilon ),
+		m_start( 0.f, 0.f ),
+		m_current( 0.f, 0.f ),
+		m_mouse2( false ),
+		m_mouseMoved( false ),
+		m_mouseMovedWhilePressed( false ){
+	}
+
 	void testSelect_simpleM1( DeviceVector position ){
-		getSelectionSystem().SelectPoint( *m_view, device_constrained( position ), m_epsilon, m_mouseMoved ? RadiantSelectionSystem::eReplace : RadiantSelectionSystem::eCycle, false );
-	}
-
-
-	bool selecting() const {
-		return m_state != c_modifier_manipulator && m_mouse2;
-	}
-
-	void setState( ModifierFlags state ){
-		const bool was_selecting = selecting();
-		m_state = state;
-		if ( was_selecting ^ selecting() ) {
-			draw_area();
-		}
+		getSelectionSystem().SelectPoint( *m_view, device_constrained( position ), m_epsilon, modifier_for_mouseMoved(), false );
 	}
 
 	void mouseDown( DeviceVector position ){
 		m_start = m_current = device_constrained( position );
-		if( !m_mouse2 && m_state != c_modifierNone ){
-			m_paintSelect = getSelectionSystem().SelectPoint_InitPaint( *m_view, position, m_epsilon, ( m_state & c_modifier_face ) != c_modifierNone );
+		m_paintMode = RadiantSelectionSystem::eSelect;
+		if( m1selecting() ){
+			m_paintMode = getSelectionSystem().SelectPoint_InitPaint( *m_view, position, m_epsilon, g_modifiers == c_modifier_face );
 		}
 	}
 
@@ -8481,26 +8479,21 @@ public:
 		if( m_mouse2 ){
 			draw_area();
 		}
-		else if( m_state != c_modifier_manipulator ){
-			getSelectionSystem().SelectPoint( *m_view, m_current, m_epsilon,
-			                                  m_paintSelect ? RadiantSelectionSystem::eSelect : RadiantSelectionSystem::eDeselect,
-			                                  ( m_state & c_modifier_face ) != c_modifierNone );
+		else if( m1selecting() ){
+			getSelectionSystem().SelectPoint( *m_view, m_current, m_epsilon, m_paintMode, g_modifiers == c_modifier_face );
 		}
 	}
-	typedef MemberCaller1<Selector_, DeviceVector, &Selector_::mouseMoved> MouseMovedCaller;
+	typedef MemberCaller<Selector_, void(DeviceVector), &Selector_::mouseMoved> MouseMovedCaller;
 
 	void mouseUp( DeviceVector position ){
 		if( m_mouse2 ){
-			testSelect( device_constrained( position ) );
+			m2testSelect( device_constrained( position ) );
 		}
 		else{
 			m_start = m_current = DeviceVector( 0.0f, 0.0f );
 		}
-
-		g_mouseMovedCallback.clear();
-		g_mouseUpCallback.clear();
 	}
-	typedef MemberCaller1<Selector_, DeviceVector, &Selector_::mouseUp> MouseUpCaller;
+	typedef MemberCaller<Selector_, void(DeviceVector), &Selector_::mouseUp> MouseUpCaller;
 };
 
 
@@ -8519,7 +8512,6 @@ class Manipulator_
 		}
 	}
 	const DeviceVector& m_epsilon;
-	const ModifierFlags& m_state;
 
 public:
 	const View* m_view;
@@ -8527,33 +8519,28 @@ public:
 	bool m_moving_transformOrigin;
 	bool m_mouseMovedWhilePressed;
 
-	Manipulator_( const DeviceVector& epsilon, const ModifierFlags& state ) :
+	Manipulator_( const DeviceVector& epsilon ) :
 		m_epsilon( epsilon ),
-		m_state( state ),
 		m_moving_transformOrigin( false ),
 		m_mouseMovedWhilePressed( false ) {
 	}
 
 	bool mouseDown( DeviceVector position ){
 		if( getSelectionSystem().ManipulatorMode() == SelectionSystem::eClip )
-			Clipper_tryDoubleclick();
+			Clipper_tryDoubleclick(); // this b4 SelectManipulator() to track that latest click added no points (hence 2x click one point)
 		return getSelectionSystem().SelectManipulator( *m_view, position, getEpsilon() );
 	}
 
 	void mouseMoved( DeviceVector position ){
 		if( m_mouseMovedWhilePressed )
-			getSelectionSystem().MoveSelected( *m_view, position, bitfield_enabled( m_state, c_modifierShift ),
-			                                                      bitfield_enabled( m_state, c_modifierControl ),
-			                                                      bitfield_enabled( m_state, c_modifierAlt ) );
+			getSelectionSystem().MoveSelected( *m_view, position );
 	}
-	typedef MemberCaller1<Manipulator_, DeviceVector, &Manipulator_::mouseMoved> MouseMovedCaller;
+	typedef MemberCaller<Manipulator_, void(DeviceVector), &Manipulator_::mouseMoved> MouseMovedCaller;
 
 	void mouseUp( DeviceVector position ){
 		m_moving_transformOrigin = getSelectionSystem().endMove();
-		g_mouseMovedCallback.clear();
-		g_mouseUpCallback.clear();
 	}
-	typedef MemberCaller1<Manipulator_, DeviceVector, &Manipulator_::mouseUp> MouseUpCaller;
+	typedef MemberCaller<Manipulator_, void(DeviceVector), &Manipulator_::mouseUp> MouseUpCaller;
 
 	void highlight( DeviceVector position ){
 		getSelectionSystem().HighlightManipulator( *m_view, position, getEpsilon() );
@@ -8566,7 +8553,6 @@ public:
 class RadiantWindowObserver final : public SelectionSystemWindowObserver
 {
 	DeviceVector m_epsilon;
-	ModifierFlags m_state;
 
 	int m_width;
 	int m_height;
@@ -8578,6 +8564,9 @@ class RadiantWindowObserver final : public SelectionSystemWindowObserver
 	float m_movePressed; /* pressed move after m_moveStart, for decision: m1 tunnel selector or manipulate and if to do tunnel selector at all */
 	DeviceVector m_moveStart;
 	DeviceVector m_moveEnd;
+	// track latest onMouseMotion() interaction to trigger update onModifierDown(), onModifierUp()
+	inline static RadiantWindowObserver *m_latestObserver = nullptr;
+	inline static WindowVector m_latestPosition;
 
 	Selector_ m_selector;
 	Manipulator_ m_manipulator;
@@ -8585,14 +8574,16 @@ class RadiantWindowObserver final : public SelectionSystemWindowObserver
 public:
 
 	RadiantWindowObserver() :
-		m_state( c_modifierNone ),
 		m_mouse_down( false ),
 		m_moveEpsilon( .01f ),
 		m_selector( m_epsilon ),
-		m_manipulator( m_epsilon, m_state ),
-		m_texmanipulator( m_epsilon, m_state ){
+		m_manipulator( m_epsilon ),
+		m_texmanipulator( m_epsilon ){
 	}
-	void release(){
+	~RadiantWindowObserver(){
+		m_latestObserver = nullptr;
+	}
+	void release() override {
 		delete this;
 	}
 	void setView( const View& view ) override {
@@ -8606,34 +8597,32 @@ public:
 	void updateEpsilon(){
 		m_epsilon = DeviceVector( g_SELECT_EPSILON / static_cast<float>( m_width ), g_SELECT_EPSILON / static_cast<float>( m_height ) );
 	}
-	void onSizeChanged( int width, int height ){
+	void onSizeChanged( int width, int height ) override {
 		m_width = width;
 		m_height = height;
 		updateEpsilon();
 	}
-	void onMouseDown( const WindowVector& position, ButtonIdentifier button, ModifierFlags modifiers ){
+	void onMouseDown( const WindowVector& position, ButtonIdentifier button, ModifierFlags modifiers ) override {
 		updateEpsilon(); /* could have changed, as it is user setting */
+
+		if( m_mouse_down ) return; /* prevent simultaneous mouse presses */
 
 		const DeviceVector devicePosition( device( position ) );
 
 		if ( button == c_button_select || ( button == c_button_select2 && modifiers != c_modifierNone ) ) {
 			m_mouse_down = true;
 
-			const bool clipper2d( !m_manipulator.m_view->fill() && button == c_button_select && modifiers == c_modifierControl );
+			const bool clipper2d( button == c_button_select && ClipManipulator::quickCondition( modifiers, *m_manipulator.m_view ) );
 			if( clipper2d && getSelectionSystem().ManipulatorMode() != SelectionSystem::eClip )
 				ClipperModeQuick();
 
-			if ( ( modifiers == c_modifier_manipulator
-			       || clipper2d
-			       || ( modifiers == c_modifierAlt && getSelectionSystem().Mode() == SelectionSystem::ePrimitive ) /* AltResize */
-			       || ( modifiers == ( c_modifierAlt | c_modifierControl ) && getSelectionSystem().Mode() == SelectionSystem::ePrimitive ) /* extrude */
-			     ) && m_manipulator.mouseDown( devicePosition ) ) {
+			if ( button == c_button_select && m_manipulator.mouseDown( devicePosition ) ) {
 				g_mouseMovedCallback.insert( MouseEventCallback( Manipulator_::MouseMovedCaller( m_manipulator ) ) );
 				g_mouseUpCallback.insert( MouseEventCallback( Manipulator_::MouseUpCaller( m_manipulator ) ) );
 			}
 			else
 			{
-				m_selector.m_mouse2 = ( button != c_button_select );
+				m_selector.m_mouse2 = ( button == c_button_select2 );
 				m_selector.mouseDown( devicePosition );
 				g_mouseMovedCallback.insert( MouseEventCallback( Selector_::MouseMovedCaller( m_selector ) ) );
 				g_mouseUpCallback.insert( MouseEventCallback( Selector_::MouseUpCaller( m_selector ) ) );
@@ -8649,7 +8638,7 @@ public:
 		m_moveStart = devicePosition;
 		m_movePressed = 0.f;
 	}
-	void onMouseMotion( const WindowVector& position, ModifierFlags modifiers ){
+	void onMouseMotion( const WindowVector& position, ModifierFlags modifiers ) override {
 		m_selector.m_mouseMoved = mouse_moved_epsilon( position, m_moveEnd, m_move );
 		if ( m_mouse_down && !g_mouseMovedCallback.empty() ) {
 			m_manipulator.m_mouseMovedWhilePressed = m_selector.m_mouseMovedWhilePressed = mouse_moved_epsilon( position, m_moveStart, m_movePressed );
@@ -8658,11 +8647,14 @@ public:
 		else{
 			m_manipulator.highlight( device( position ) );
 		}
+		m_latestObserver = this;
+		m_latestPosition = position;
 	}
-	void onMouseUp( const WindowVector& position, ButtonIdentifier button, ModifierFlags modifiers ){
-		if ( ( button == c_button_select || button == c_button_select2 || button == c_button_texture ) && !g_mouseUpCallback.empty() ) {
+	void onMouseUp( const WindowVector& position, ButtonIdentifier button, ModifierFlags modifiers ) override {
+		if ( button != c_buttonInvalid && !g_mouseUpCallback.empty() ) {
 			g_mouseUpCallback.get() ( device( position ) );
-			m_mouse_down = false;
+			g_mouseMovedCallback.clear();
+			g_mouseUpCallback.clear();
 		}
 		if( button == c_button_select	/* L button w/o mouse moved = tunnel selection */
 		 && modifiers == c_modifierNone
@@ -8673,9 +8665,11 @@ public:
 		 && getSelectionSystem().ManipulatorMode() != SelectionSystem::eBuild ){
 			m_selector.testSelect_simpleM1( device( position ) );
 		}
-		if( getSelectionSystem().ManipulatorMode() == SelectionSystem::eClip )
+		if( getSelectionSystem().ManipulatorMode() == SelectionSystem::eClip
+		&& button == c_button_select && ( modifiers == c_modifierNone || ClipManipulator::quickCondition( modifiers, *m_manipulator.m_view ) ) )
 			Clipper_tryDoubleclickedCut();
 
+		m_mouse_down = false; /* unconditionally drop the flag to surely not lock the onMouseDown() */
 		m_manipulator.m_moving_transformOrigin = false;
 		m_selector.m_mouseMoved = false;
 		m_selector.m_mouseMovedWhilePressed = false;
@@ -8683,13 +8677,15 @@ public:
 		m_moveEnd = device( position );
 		m_move = 0.f;
 	}
-	void onModifierDown( ModifierFlags type ){
-		g_modifiers = m_state = bitfield_enable( m_state, type );
-		m_selector.setState( m_state );
+	void onModifierDown( ModifierFlags type ) override {
+		g_modifiers = bitfield_enable( g_modifiers, type );
+		if( this == m_latestObserver )
+			onMouseMotion( m_latestPosition, g_modifiers );
 	}
-	void onModifierUp( ModifierFlags type ){
-		g_modifiers = m_state = bitfield_disable( m_state, type );
-		m_selector.setState( m_state );
+	void onModifierUp( ModifierFlags type ) override {
+		g_modifiers = bitfield_disable( g_modifiers, type );
+		if( this == m_latestObserver )
+			onMouseMotion( m_latestPosition, g_modifiers );
 	}
 	DeviceVector device( WindowVector window ) const {
 		return window_to_normalised_device( window, m_width, m_height );

@@ -31,7 +31,7 @@ void WinPrint( const char *str, ... ){
 	va_list argptr;
 	char text[4096];
 
-	va_start( argptr,str );
+	va_start( argptr, str );
 	vsprintf( text, str, argptr );
 	va_end( argptr );
 
@@ -55,7 +55,7 @@ int Net_Send( socket_t *sock, netmessage_t *msg ){
 	msg->size = 0;
 	NMSG_WriteLong( msg, size - 4 );
 	msg->size = size;
-	//WinPrint("Net_Send: message of size %d\n", sendmsg.size);
+	//WinPrint( "Net_Send: message of size %d\n", sendmsg.size );
 	return WINS_Write( sock->socket, msg->data, msg->size, NULL );
 } //end of the function Net_SendSocketReliable
 //===========================================================================
@@ -93,7 +93,7 @@ int Net_Receive( socket_t *sock, netmessage_t *msg ){
 		WinPrint( "Net_Receive: size header read error\n" );
 		return -1;
 	} //end if
-	  //WinPrint("Net_Receive: message size header %d\n", msg->size);
+	  //WinPrint( "Net_Receive: message size header %d\n", msg->size );
 	sock->msg.read = 0;
 	sock->remaining = NMSG_ReadLong( &sock->msg );
 	if ( sock->remaining == 0 ) {
@@ -378,13 +378,17 @@ void NMSG_WriteFloat( netmessage_t *msg, float c ){
 // Returns:					-
 // Changes Globals:		-
 //===========================================================================
-void NMSG_WriteString( netmessage_t *msg, char *string ){
-	if ( msg->size + strlen( string ) + 1 >= MAX_NETMESSAGE ) {
+void NMSG_WriteString_n( netmessage_t *msg, const char *string, int n ){
+	if ( msg->size + n >= MAX_NETMESSAGE ) {
 		WinPrint( "NMSG_WriteString: overflow\n" );
 		return;
 	} //end if
-	memcpy( &msg->data[msg->size], string, strlen( string ) + 1 );
-	msg->size += strlen( string ) + 1;
+	memcpy( &msg->data[msg->size], string, n );
+	msg->size += n;
+}
+
+void NMSG_WriteString( netmessage_t *msg, const char *string ){
+	NMSG_WriteString_n( msg, string, strlen( string ) );
 } //end of the function NMSG_WriteString
 //===========================================================================
 //

@@ -296,7 +296,19 @@ public:
 	int m_surfaceFlags;
 	int m_contentFlags;
 	int m_value;
-	bool m_specified;
+	bool m_specified; /* this represents Q2 duality, where flags may be absent in .map file = use .wal tex flags
+	                     or present = use them
+	                     in editor runtime this tracks user will regarding this
+	                     in m_contentFlags BRUSH_DETAIL_MASK flag is special, since its presence must be homogenous over faces
+	                     thus we modify the flag only via separate function
+	                     also when modifying other flags it must be immutable
+	                     this is okay; problematic case is when .wal defines flags + detail flag is involved
+	                     we need to store .wal flags in .map then,
+	                     because with 'detail 0 0' in .map it's not clear whether 'detail + .wal' or 'detail + all unset' is implied
+	                     current solution is to treat (!m_specified && detail) as a special state and set/clear flags from .wal immediately
+	                     alternative could be only adding .wal flags during save and display,
+	                     which would solve possible flags mess after texture change,
+	                     but after .map reloading we wont surely say which state is implied anyway (now always treating as m_specified) */
 };
 
 inline void ContentsFlagsValue_assignMasked( ContentsFlagsValue& flags, const ContentsFlagsValue& other ){
@@ -417,15 +429,12 @@ public:
 	}
 	ContentsFlagsValue getFlags() const {
 		ASSERT_MESSAGE( m_realised, "FaceShader::getFlags: flags not valid when unrealised" );
-		if ( !m_flags.m_specified ) {
-			return ContentsFlagsValue(
-			           m_state->getTexture().surfaceFlags,
-			           m_state->getTexture().contentFlags,
-			           m_state->getTexture().value,
-			           true
-			       );
-		}
-		return m_flags;
+		return ( m_flags.m_specified || bitfield_enabled( m_flags.m_contentFlags, BRUSH_DETAIL_MASK ) )
+		         ? m_flags
+		         : ContentsFlagsValue( m_state->getTexture().surfaceFlags,
+		                               m_state->getTexture().contentFlags,
+		                               m_state->getTexture().value,
+		                               true );
 	}
 	void setFlags( const ContentsFlagsValue& flags ){
 		ASSERT_MESSAGE( m_realised, "FaceShader::setFlags: flags not valid when unrealised" );
@@ -557,11 +566,11 @@ public:
 		Texdef_Rotate( m_projection, angle );
 		addScale();
 	}
-///ProjectTexture along 'direction' with parameters, defined by texdef_t
+	///ProjectTexture along 'direction' with parameters, defined by texdef_t
 	void ProjectTexture( const Plane3& plane, const texdef_t& texdef, const Vector3* direction ){
 		Texdef_ProjectTexture( m_projection, m_shader.width(), m_shader.height(), plane, texdef, direction );
 	}
-///ProjectTexture along 'normal' with parameters, defined by TextureProjection
+	///ProjectTexture along 'normal' with parameters, defined by TextureProjection
 	void ProjectTexture( const Plane3& plane, const TextureProjection& projection, const Vector3& normal ){
 		Texdef_ProjectTexture( m_projection, m_shader.width(), m_shader.height(), plane, projection, normal );
 	}
@@ -1128,7 +1137,7 @@ public:
 		m_observer->planeChanged();
 	}
 
-/// \brief Reverts the transformable state of the brush to identity.
+	/// \brief Reverts the transformable state of the brush to identity.
 	void revertTransform(){
 		m_planeTransformed = m_plane;
 		planepts_assign( m_move_planeptsTransformed, m_move_planepts );
@@ -1339,12 +1348,22 @@ public:
 	void setDetail( bool detail ){
 		undoSave();
 		if ( detail && !isDetail() ) {
-			m_shader.m_flags.m_contentFlags |= BRUSH_DETAIL_MASK;
+			if( m_shader.m_flags.m_specified )
+				m_shader.m_flags.m_contentFlags |= BRUSH_DETAIL_MASK;
+			else
+				m_shader.m_flags = ContentsFlagsValue( m_shader.m_state->getTexture().surfaceFlags,
+				                                       m_shader.m_state->getTexture().contentFlags | BRUSH_DETAIL_MASK,
+				                                       m_shader.m_state->getTexture().value,
+				                                       false );
 		}
 		else if ( !detail && isDetail() ) {
-			m_shader.m_flags.m_contentFlags &= ~BRUSH_DETAIL_MASK;
+			if( m_shader.m_flags.m_specified )
+				m_shader.m_flags.m_contentFlags &= ~BRUSH_DETAIL_MASK;
+			else
+				m_shader.m_flags = ContentsFlagsValue( 0, 0, 0, false );
 		}
 		m_observer->shaderChanged();
+		Brush_textureChanged();
 	}
 
 	bool contributes() const {
@@ -1492,16 +1511,12 @@ public:
 	SelectableEdge( Faces& faces, FaceVertexId faceVertex )
 		: m_faces( faces ), m_faceVertex( faceVertex ){
 	}
-	SelectableEdge& operator=( const SelectableEdge& other ){
-		m_faceVertex = other.m_faceVertex;
-		return *this;
-	}
 
 	Face& getFace() const {
 		return *m_faces[m_faceVertex.getFace()];
 	}
 
-	void testSelect( SelectionTest& test, SelectionIntersection& best ){
+	void testSelect( SelectionTest& test, SelectionIntersection& best ) const {
 		test.TestPoint( getEdge(), best );
 	}
 };
@@ -1518,10 +1533,6 @@ public:
 
 	SelectableVertex( Faces& faces, FaceVertexId faceVertex )
 		: m_faces( faces ), m_faceVertex( faceVertex ){
-	}
-	SelectableVertex& operator=( const SelectableVertex& other ){
-		m_faceVertex = other.m_faceVertex;
-		return *this;
 	}
 
 	Face& getFace() const {
@@ -1604,8 +1615,8 @@ private:
 	AABB m_aabb_local;
 // ----
 
-	Callback m_evaluateTransform;
-	Callback m_boundsChanged;
+	Callback<void()> m_evaluateTransform;
+	Callback<void()> m_boundsChanged;
 
 	mutable bool m_planeChanged;   // b-rep evaluation required
 	mutable bool m_transformChanged;   // transform evaluation required
@@ -1615,7 +1626,7 @@ private:
 public:
 	STRING_CONSTANT( Name, "Brush" );
 
-	Callback m_lightsChanged;
+	Callback<void()> m_lightsChanged;
 
 // static data
 	static Shader* m_state_point;
@@ -1625,7 +1636,7 @@ public:
 	static EBrushType m_type;
 	static double m_maxWorldCoord;
 
-	Brush( scene::Node& node, const Callback& evaluateTransform, const Callback& boundsChanged ) :
+	Brush( scene::Node& node, const Callback<void()>& evaluateTransform, const Callback<void()>& boundsChanged ) :
 		m_node( &node ),
 		m_undoable_observer( 0 ),
 		m_map( 0 ),
@@ -1639,7 +1650,7 @@ public:
 		m_transformChanged( false ){
 		planeChanged();
 	}
-	Brush( const Brush& other, scene::Node& node, const Callback& evaluateTransform, const Callback& boundsChanged ) :
+	Brush( const Brush& other, scene::Node& node, const Callback<void()>& evaluateTransform, const Callback<void()>& boundsChanged ) :
 		m_node( &node ),
 		m_undoable_observer( 0 ),
 		m_map( 0 ),
@@ -1807,7 +1818,7 @@ public:
 		planeChanged();
 		m_transformChanged = true;
 	}
-	typedef MemberCaller<Brush, &Brush::transformChanged> TransformChangedCaller;
+	typedef MemberCaller<Brush, void(), &Brush::transformChanged> TransformChangedCaller;
 
 	void evaluateTransform(){
 		if ( m_transformChanged ) {
@@ -1921,7 +1932,7 @@ public:
 	void vertexModeBuildHull( bool allTransformed = false );
 	void vertexModeSnap( const float snap, bool all );
 
-/// \brief Returns the absolute index of the \p faceVertex.
+	/// \brief Returns the absolute index of the \p faceVertex.
 	std::size_t absoluteIndex( FaceVertexId faceVertex ){
 		std::size_t index = 0;
 		for ( std::size_t i = 0; i < faceVertex.getFace(); ++i )
@@ -1939,7 +1950,7 @@ public:
 		}
 	}
 
-/// \brief The undo memento for a brush stores only the list of face references - the faces are not copied.
+	/// \brief The undo memento for a brush stores only the list of face references - the faces are not copied.
 	class BrushUndoMemento : public UndoMemento
 	{
 	public:
@@ -1980,7 +1991,7 @@ public:
 		return !m_faces.empty() && m_faces.front()->isDetail();
 	}
 
-/// \brief Appends a copy of \p face to the end of the face list.
+	/// \brief Appends a copy of \p face to the end of the face list.
 	Face* addFace( const Face& face ){
 		if ( m_faces.size() == c_brush_maxFaces ) {
 			return 0;
@@ -1992,7 +2003,7 @@ public:
 		return m_faces.back();
 	}
 
-/// \brief Appends a new face constructed from the parameters to the end of the face list.
+	/// \brief Appends a new face constructed from the parameters to the end of the face list.
 	Face* addPlane( const DoubleVector3& p0, const DoubleVector3& p1, const DoubleVector3& p2, const char* shader, const TextureProjection& projection ){
 		if ( m_faces.size() == c_brush_maxFaces ) {
 			return 0;
@@ -2105,7 +2116,7 @@ public:
 		return m_faces.empty();
 	}
 
-/// \brief Returns true if any face of the brush contributes to the final B-Rep.
+	/// \brief Returns true if any face of the brush contributes to the final B-Rep.
 	bool hasContributingFaces() const {
 		for ( const_iterator i = begin(); i != end(); ++i )
 		{
@@ -2116,8 +2127,8 @@ public:
 		return false;
 	}
 
-/// \brief Removes faces that do not contribute to the brush. This is useful for cleaning up after CSG operations on the brush.
-/// Note: removal of empty faces is not performed during direct brush manipulations, because it would make a manipulation irreversible if it created an empty face.
+	/// \brief Removes faces that do not contribute to the brush. This is useful for cleaning up after CSG operations on the brush.
+	/// Note: removal of empty faces is not performed during direct brush manipulations, because it would make a manipulation irreversible if it created an empty face.
 	void removeEmptyFaces(){
 		evaluateBRep();
 
@@ -2137,7 +2148,7 @@ public:
 		}
 	}
 
-/// \brief Constructs \p winding from the intersection of \p plane with the other planes of the brush.
+	/// \brief Constructs \p winding from the intersection of \p plane with the other planes of the brush.
 	void windingForClipPlane( Winding& winding, const Plane3& plane ) const {
 		FixedWinding buffer[2];
 		bool swap = false;
@@ -2183,7 +2194,7 @@ public:
 				}
 #endif
 
-				//ASSERT_MESSAGE(buffer[!swap].numpoints != 1, "created single-point winding");
+				//ASSERT_MESSAGE( buffer[!swap].numpoints != 1, "created single-point winding" );
 
 				swap = !swap;
 			}
@@ -2236,7 +2247,7 @@ public:
 		}
 	}
 
-/// \brief Makes this brush a deep-copy of the \p other.
+	/// \brief Makes this brush a deep-copy of the \p other.
 	void copy( const Brush& other ){
 		for ( Faces::const_iterator i = other.m_faces.begin(); i != other.m_faces.end(); ++i )
 		{
@@ -2245,7 +2256,7 @@ public:
 		planeChanged();
 	}
 
-/// for the only use to quickly check, if about to be transformed brush makes sense
+	/// for the only use to quickly check, if about to be transformed brush makes sense
 	bool contributes() const {
 		/* plane_unique() ripoff, calling no evaluation */
 		auto plane_unique_ = [this]( std::size_t index ) -> bool {
@@ -2343,7 +2354,7 @@ private:
 		}
 	}
 
-/// \brief Returns true if the face identified by \p index is preceded by another plane that takes priority over it.
+	/// \brief Returns true if the face identified by \p index is preceded by another plane that takes priority over it.
 	bool plane_unique( std::size_t index ) const {
 		// duplicate plane
 		for ( std::size_t i = 0; i < m_faces.size(); ++i )
@@ -2355,7 +2366,7 @@ private:
 		return true;
 	}
 
-/// \brief Removes edges that are smaller than the tolerance used when generating brush windings.
+	/// \brief Removes edges that are smaller than the tolerance used when generating brush windings.
 	void removeDegenerateEdges(){
 		for ( std::size_t i = 0; i < m_faces.size(); ++i )
 		{
@@ -2383,7 +2394,7 @@ private:
 		}
 	}
 
-/// \brief Invalidates faces that have only two vertices in their winding, while preserving edge-connectivity information.
+	/// \brief Invalidates faces that have only two vertices in their winding, while preserving edge-connectivity information.
 	void removeDegenerateFaces(){
 		// save adjacency info for degenerate faces
 		for ( std::size_t i = 0; i < m_faces.size(); ++i )
@@ -2422,12 +2433,12 @@ private:
 		}
 	}
 
-/// \brief Removes edges that have the same adjacent-face as their immediate neighbour.
+	/// \brief Removes edges that have the same adjacent-face as their immediate neighbour.
 	void removeDuplicateEdges(){
 		// verify face connectivity graph
 		for ( std::size_t i = 0; i < m_faces.size(); ++i )
 		{
-			//if(m_faces[i]->contributes())
+			//if( m_faces[i]->contributes() )
 			{
 				Winding& winding = m_faces[i]->getWinding();
 				for ( std::size_t j = 0; j != winding.numpoints; )
@@ -2448,12 +2459,12 @@ private:
 		}
 	}
 
-/// \brief Removes edges that do not have a matching pair in their adjacent-face.
+	/// \brief Removes edges that do not have a matching pair in their adjacent-face.
 	void verifyConnectivityGraph(){
 		// verify face connectivity graph
 		for ( std::size_t i = 0; i < m_faces.size(); ++i )
 		{
-			//if(m_faces[i]->contributes())
+			//if( m_faces[i]->contributes() )
 			{
 				Winding& winding = m_faces[i]->getWinding();
 				for ( Winding::iterator j = winding.begin(); j != winding.end(); )
@@ -2478,7 +2489,7 @@ private:
 		}
 	}
 
-/// \brief Returns true if the brush is a finite volume. A brush without a finite volume extends past the maximum world bounds and is not valid.
+	/// \brief Returns true if the brush is a finite volume. A brush without a finite volume extends past the maximum world bounds and is not valid.
 	bool isBounded(){
 		for ( const_iterator i = begin(); i != end(); ++i )
 		{
@@ -2489,7 +2500,7 @@ private:
 		return true;
 	}
 
-/// \brief Constructs the polygon windings for each face of the brush. Also updates the brush bounding-box and face texture-coordinates.
+	/// \brief Constructs the polygon windings for each face of the brush. Also updates the brush bounding-box and face texture-coordinates.
 	bool buildWindings(){
 
 		{
@@ -2539,7 +2550,7 @@ private:
 		return degenerate;
 	}
 
-/// \brief Constructs the face windings and updates anything that depends on them.
+	/// \brief Constructs the face windings and updates anything that depends on them.
 	void buildBRep();
 };
 
@@ -2689,7 +2700,7 @@ public:
 		}
 		m_selectionChanged( selectable );
 	}
-	typedef MemberCaller1<FaceInstance, const Selectable&, &FaceInstance::selectedChanged> SelectedChangedCaller;
+	typedef MemberCaller<FaceInstance, void(const Selectable&), &FaceInstance::selectedChanged> SelectedChangedCaller;
 
 	bool selectedVertices() const {
 		return !m_vertexSelection.empty();
@@ -2777,7 +2788,7 @@ public:
 	}
 
 	void iterate_selected( AABB& aabb ) const {
-		SelectedComponents_foreach( AABBExtendByPoint( aabb ) );
+		SelectedComponents_foreach( [&]( const Vector3& point ){ aabb_extend_by_point_safe( aabb, point ); } );
 	}
 
 	void gatherSelectedComponents( const Vector3Callback& callback ) const {
@@ -2801,19 +2812,10 @@ public:
 		}
 	}
 
-	class RenderablePointVectorPushBack
-	{
-		RenderablePointVector& m_points;
-	public:
-		RenderablePointVectorPushBack( RenderablePointVector& points ) : m_points( points ){
-		}
-		void operator()( const Vector3& point ) const {
-			m_points.push_back( pointvertex_for_windingpoint( point, colour_selected ) );
-		}
-	};
-
 	void iterate_selected( RenderablePointVector& points ) const {
-		SelectedComponents_foreach( RenderablePointVectorPushBack( points ) );
+		SelectedComponents_foreach( [&]( const Vector3& point ){
+			points.push_back( pointvertex_for_windingpoint( point, colour_selected ) );
+		} );
 	}
 
 	bool intersectVolume( const VolumeTest& volume, const Matrix4& localToWorld ) const {
@@ -3142,7 +3144,7 @@ inline void Face_addLight( const FaceInstance& face, const Matrix4& localToWorld
 typedef std::vector<FaceInstance> FaceInstances;
 typedef std::vector<FaceInstance*> FaceInstances_ptrs;
 
-class EdgeInstance : public Selectable
+class EdgeInstance final : public Selectable
 {
 	FaceInstances& m_faceInstances;
 	SelectableEdge* m_edge;
@@ -3170,15 +3172,11 @@ public:
 	EdgeInstance( FaceInstances& faceInstances, SelectableEdge& edge )
 		: m_faceInstances( faceInstances ), m_edge( &edge ){
 	}
-	EdgeInstance& operator=( const EdgeInstance& other ){
-		m_edge = other.m_edge;
-		return *this;
-	}
 
-	void setSelected( bool select ){
+	void setSelected( bool select ) override {
 		select_edge( select );
 	}
-	bool isSelected() const {
+	bool isSelected() const override {
 		return selected_edge();
 	}
 
@@ -3200,24 +3198,24 @@ public:
 		}
 	}
 
-	void bestPlaneIndirect( const SelectionTest& test, Plane3& plane, Vector3& intersection, float& dist, float& dot ) const {
+	void bestPlaneIndirect( const SelectionTest& test, PlaneSelectable::BestPlaneData& planeData, float& dot ) const {
 		const Winding& winding = m_edge->getFace().getWinding();
 		FaceVertexId faceVertex = m_edge->m_faceVertex;
 		Line line( winding[faceVertex.getVertex()].vertex, winding[Winding_next( winding, faceVertex.getVertex() )].vertex );
 		if( matrix4_clip_line_by_nearplane( test.getVolume().GetViewMatrix(), line ) == 2 ){
-			const Vector3 intersection_new = line_closest_point( line, g_vector3_identity );
-			const float dist_new = vector3_length_squared( intersection_new );
-			const float dot_new = fabs( vector3_dot( vector3_normalised( intersection_new ), vector3_normalised( line.end - line.start ) ) );
-			if( dist - dist_new > 1e-6f // new dist noticeably smaller
-			 || ( float_equal_epsilon( dist_new, dist, 1e-6f ) && dot_new < dot ) ){ // or ambiguous case. Resolve it by dot comparison
+			const Vector3 point_new = line_closest_point( line, g_vector3_identity );
+			const float dist_new = vector3_length_squared( point_new );
+			const float dot_new = fabs( vector3_dot( vector3_normalised( point_new ), vector3_normalised( line.end - line.start ) ) );
+			if( planeData.m_dist - dist_new > 1e-6f // new dist noticeably smaller
+			 || ( float_equal_epsilon( dist_new, planeData.m_dist, 1e-6f ) && dot_new < dot ) ){ // or ambiguous case. Resolve it by dot comparison
 				const Plane3& plane1 = m_faceInstances[faceVertex.getFace()].getFace().plane3();
 				faceVertex = next_edge( m_edge->m_faces, faceVertex );
 				const Plane3& plane2 = m_faceInstances[faceVertex.getFace()].getFace().plane3();
 
-				auto assign_plane = [&plane, &intersection, intersection_new, &dist, dist_new, &dot, dot_new]( const Plane3& plane_new ){
-					plane = plane_new;
-					intersection = intersection_new;
-					dist = dist_new;
+				auto assign_plane = [&planeData, point_new, dist_new, &dot, dot_new]( const Plane3& plane_new ){
+					planeData.m_plane = plane_new;
+					planeData.m_closestPoint = point_new;
+					planeData.m_dist = dist_new;
 					dot = dot_new;
 				};
 
@@ -3238,7 +3236,7 @@ public:
 	}
 };
 
-class VertexInstance : public Selectable
+class VertexInstance final : public Selectable
 {
 	FaceInstances& m_faceInstances;
 	SelectableVertex* m_vertex;
@@ -3269,15 +3267,11 @@ public:
 	VertexInstance( FaceInstances& faceInstances, SelectableVertex& vertex )
 		: m_faceInstances( faceInstances ), m_vertex( &vertex ){
 	}
-	VertexInstance& operator=( const VertexInstance& other ){
-		m_vertex = other.m_vertex;
-		return *this;
-	}
 
-	void setSelected( bool select ){
+	void setSelected( bool select ) override {
 		select_vertex( select );
 	}
-	bool isSelected() const {
+	bool isSelected() const override {
 		return selected_vertex();
 	}
 
@@ -3403,7 +3397,7 @@ public:
 	void lightsChanged(){
 		m_lightList->lightsChanged();
 	}
-	typedef MemberCaller<BrushInstance, &BrushInstance::lightsChanged> LightsChangedCaller;
+	typedef MemberCaller<BrushInstance, void(), &BrushInstance::lightsChanged> LightsChangedCaller;
 
 	STRING_CONSTANT( Name, "BrushInstance" );
 
@@ -3428,9 +3422,9 @@ public:
 		Instance::setTransformChangedCallback( LightsChangedCaller( *this ) );
 	}
 	~BrushInstance(){
-		Instance::setTransformChangedCallback( Callback() );
+		Instance::setTransformChangedCallback( Callback<void()>() );
 
-		m_brush.m_lightsChanged = Callback();
+		m_brush.m_lightsChanged = Callback<void()>();
 		GlobalShaderCache().detach( *this );
 
 		m_counter->decrement();
@@ -3461,13 +3455,13 @@ public:
 
 		Instance::selectedChanged();
 	}
-	typedef MemberCaller1<BrushInstance, const Selectable&, &BrushInstance::selectedChanged> SelectedChangedCaller;
+	typedef MemberCaller<BrushInstance, void(const Selectable&), &BrushInstance::selectedChanged> SelectedChangedCaller;
 
 	void selectedChangedComponent( const Selectable& selectable ){
 		GlobalSelectionSystem().getObserver ( SelectionSystem::eComponent )( selectable );
 		GlobalSelectionSystem().onComponentSelection( *this, selectable );
 	}
-	typedef MemberCaller1<BrushInstance, const Selectable&, &BrushInstance::selectedChangedComponent> SelectedChangedComponentCaller;
+	typedef MemberCaller<BrushInstance, void(const Selectable&), &BrushInstance::selectedChangedComponent> SelectedChangedComponentCaller;
 
 	const BrushInstanceVisitor& forEachFaceInstance( const BrushInstanceVisitor& visitor ){
 		for ( FaceInstances::iterator i = m_faceInstances.begin(); i != m_faceInstances.end(); ++i )
@@ -3648,7 +3642,7 @@ public:
 	}
 
 	void renderSolid( Renderer& renderer, const VolumeTest& volume, const Matrix4& localToWorld ) const {
-		//renderCommon(renderer, volume);
+		//renderCommon( renderer, volume );
 
 		m_lightList->evaluateLights();
 
@@ -3662,7 +3656,7 @@ public:
 	}
 
 	void renderWireframe( Renderer& renderer, const VolumeTest& volume, const Matrix4& localToWorld ) const {
-		//renderCommon(renderer, volume);
+		//renderCommon( renderer, volume );
 
 		evaluateViewDependent( volume, localToWorld );
 
@@ -3886,7 +3880,7 @@ public:
 			}
 		}
 	}
-	void selectPlanes( Selector& selector, SelectionTest& test, const PlaneCallback& selectedPlaneCallback ){
+	void selectPlanes( Selector& selector, SelectionTest& test, const PlaneCallback& selectedPlaneCallback ) override {
 		FaceInstances_ptrs bestInstances;
 		selectPlanes( test, bestInstances );
 
@@ -3897,39 +3891,39 @@ public:
 				return; // select only plane in camera
 		}
 	}
-	void selectReversedPlanes( Selector& selector, const SelectedPlanes& selectedPlanes ){
+	void selectReversedPlanes( Selector& selector, const SelectedPlanes& selectedPlanes ) override {
 		for ( FaceInstances::iterator i = m_faceInstances.begin(); i != m_faceInstances.end(); ++i )
 		{
 			( *i ).selectReversedPlane( selector, selectedPlanes );
 		}
 	}
 
-	void bestPlaneDirect( SelectionTest& test, Plane3& plane, SelectionIntersection& intersection ) const {
+	void bestPlaneDirect( SelectionTest& test, BestPlaneData& planeData ) const override {
 		test.BeginMesh( localToWorld() );
 		for ( const FaceInstance& fi : m_faceInstances )
 		{
-			SelectionIntersection intersection_new;
-			fi.testSelect( test, intersection_new );
-			if( SelectionIntersection_closer( intersection_new, intersection ) ){
-				intersection = intersection_new;
-				plane = fi.getFace().plane3();
+			SelectionIntersection intersection;
+			fi.testSelect( test, intersection );
+			if( SelectionIntersection_closer( intersection, planeData.m_intersection ) ){
+				planeData.m_intersection = intersection;
+				planeData.m_plane = fi.getFace().plane3();
 			}
 		}
 	}
-	void bestPlaneIndirect( SelectionTest& test, Plane3& plane, Vector3& intersection, float& dist ) const {
+	void bestPlaneIndirect( SelectionTest& test, BestPlaneData& planeData ) const override {
 		test.BeginMesh( localToWorld() );
 		float dot = 1;
 		for ( const EdgeInstance& ei : m_edgeInstances )
 		{
-			ei.bestPlaneIndirect( test, plane, intersection, dist, dot );
+			ei.bestPlaneIndirect( test, planeData, dot );
 		}
 	}
-	void selectByPlane( const Plane3& plane ){
+	void selectByPlane( const Plane3& plane ) override {
 		for ( FaceInstance& fi : m_faceInstances )
 			if( plane3_equal( plane, fi.getFace().plane3() ) || plane3_equal( plane, plane3_flipped( fi.getFace().plane3() ) ) )
 				fi.setSelected( SelectionSystem::eFace, true );
 	}
-	void gatherPolygonsByPlane( const Plane3& plane, std::vector<std::vector<Vector3>>& polygons ) const {
+	void gatherPolygonsByPlane( const Plane3& plane, std::vector<std::vector<Vector3>>& polygons ) const override {
 		gatherPolygonsByPlane( plane, polygons, true );
 	}
 	void gatherPolygonsByPlane( const Plane3& plane, std::vector<std::vector<Vector3>>& polygons, const bool reversed_plane_also ) const {
@@ -4083,7 +4077,7 @@ public:
 		}
 		m_brush.vertexModeFree();
 	}
-	typedef MemberCaller<BrushInstance, &BrushInstance::applyTransform> ApplyTransformCaller;
+	typedef MemberCaller<BrushInstance, void(), &BrushInstance::applyTransform> ApplyTransformCaller;
 
 	void setClipPlane( const Plane3& plane ){
 		m_clipPlane.setPlane( m_brush, plane );

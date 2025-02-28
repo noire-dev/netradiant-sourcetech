@@ -178,6 +178,9 @@ Q3map2:
 	* -nobrushsnap: disable brush vertices snapping (of drawsurfs) (experimental, keep eye on meta merge efficiency)
 	* improved brush faces triangulation wrt degenerate triangles production (non -maxarea algorithm)
 	* -globalflag <surfaceparm>: add surface flag to every bsp shader. Reusable, e.g. -globalflag slick -globalflag nodamage.
+	* fix deformvertexes autosprite2 on brushes and models
+	* tighten FilterPatchIntoTree() regarding to even (pink) points
+	* fix tiny structural brushes breaking bsp tree
 
 
 
@@ -195,6 +198,8 @@ MBSPC:
 	* append _decompiled suffix to decompiled map file names
 	* improve decompilation quality of Q1, HL maps greatly (texturing correctness, less brushes)
 	* -lessbrushes switch: less brushes when decompiling Q1, HL maps at the expense of texturing
+	* fix build speed penalty due to terminal output
+	* decompile brushes with texinfo -1 ZHLT optimisation, deduce clip, AAATRIGGER, NULL textures
 
 
 
@@ -320,6 +325,9 @@ binds...
 	* m1 drag + ctrl (Drag tool, 3D view): move-snap selecton bbox corner to pointed position in scene
 	* m1 drag + alt + ctrl: rotate-snap selection bbox to pointed brush face plane (by opposite to bbox grab side)
 	* m1 drag + ctrl + shift: move selection along initially pointed brush face plane
+	* update SelectionSystem highlights, manipulations immediately onModifierDown(), onModifierUp()
+	* add alt + m1 selection style to transform manipulator for scaling in 3D
+	* ctrl + shift + p: Shortcuts dialog (keyboard commands palette)
 
 menus...
 	* smartified content basically
@@ -351,6 +359,13 @@ menus...
 	* Brush->AutoCaulk Selected (F4); camera must be there, where legit player respawn could be, i.e. close to selection and not inside of a brush
 	* Misc->Colors->Themes->Adwaita Dark color theme
 	* view->filter->sky: Q3 shader based skies (skyParms keyword)
+	* Misc->Colors display colors
+	* Misc->Colors->Viewports Theme: load from .json presets stored in install/themes/_colors/
+	* add Blender Lighter and Green viewports themes by Julius
+	* Misc->Colors: add CameraIcon, AxisX, AxisY, AxisZ controls
+	* Misc->Colors: add Model Browser Background control
+	* Modify->Repeat: saved transforms feedback and individual resets
+	* Modify->Repeat->Reset Transforms (alt + r)
 
 misc...
 	* removed note to save before going to preferences, project settings
@@ -1095,6 +1110,10 @@ misc...
 	* light entity radius: support negative intensity display and adjustment (keep sign while adjusting)
 	* fix: do not modify light intensity on transformations besides light radius transformation
 	* light radiuses: don't render biggest radius, make them less occluding in 3D
+	* fix surface inspector updates on patch texturing changes, on UV Tool edits
+	* add prefs->Build->Region Box Shader (shader to use on the box generated around region)
+	* add bobToolz.explodeEntity: create group entity from each primitive of existing group entity
+	* improve CSG Subtract results via more defined splits order
 
 
 
@@ -1102,13 +1121,14 @@ misc...
 
 
 secret radiant features:
-	can alter in .game:	common_shaders_name="Common"	common_shaders_dir="common/"
+	can alter in .game: common_shaders_name="Common"    common_shaders_dir="common/"
 
 	can alter q3map2 being used: by editing build_menu.xml: <var name="q3map2">...
 
 	-global-Key Value and -gamename.game-Key Value options to set config settings from the command line
-		examples:	-global-gamefile q4.game	//start with q4 game mode
-				-q4.game-CamHeight 944		//set CamHeight to 944 in q4 local.pref
+		examples:
+	-global-gamefile q4.game  //start with q4 game mode
+	-q4.game-CamHeight 944    //set CamHeight to 944 in q4 local.pref
 
 
 QA

@@ -20,7 +20,7 @@
    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
    DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR ANY
-   DIRECT,INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+   DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
    ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
@@ -179,22 +179,22 @@ static GameCombo s_gameCombo;
 void GameModeImport( int value ){
 	gamemode_set( value == 0? "sp" : "mp" );
 }
-typedef FreeCaller1<int, GameModeImport> GameModeImportCaller;
+typedef FreeCaller<void(int), GameModeImport> GameModeImportCaller;
 
 void GameModeExport( const IntImportCallback& importer ){
 	const char *gamemode = gamemode_get();
 	importer( ( string_empty( gamemode ) || string_equal( gamemode, "sp" ) )? 0 : 1 );
 }
-typedef FreeCaller1<const IntImportCallback&, GameModeExport> GameModeExportCaller;
+typedef FreeCaller<void(const IntImportCallback&), GameModeExport> GameModeExportCaller;
 
 
 void FSGameImport( int value ){
 }
-typedef FreeCaller1<int, FSGameImport> FSGameImportCaller;
+typedef FreeCaller<void(int), FSGameImport> FSGameImportCaller;
 
 void FSGameExport( const IntImportCallback& importer ){
 }
-typedef FreeCaller1<const IntImportCallback&, FSGameExport> FSGameExportCaller;
+typedef FreeCaller<void(const IntImportCallback&), FSGameExport> FSGameExportCaller;
 
 
 void GameImport( int value ){
@@ -216,7 +216,7 @@ void GameImport( int value ){
 		}
 	}
 }
-typedef FreeCaller1<int, GameImport> GameImportCaller;
+typedef FreeCaller<void(int), GameImport> GameImportCaller;
 
 void GameExport( const IntImportCallback& importer ){
 	const gamecombo_t gamecombo = gamecombo_for_dir( gamename_get() );
@@ -225,7 +225,7 @@ void GameExport( const IntImportCallback& importer ){
 	s_gameCombo.fsgame_entry->setEditText( gamecombo.fs_game );
 	s_gameCombo.fsgame_entry->setEnabled( gamecombo.sensitive );
 }
-typedef FreeCaller1<const IntImportCallback&, GameExport> GameExportCaller;
+typedef FreeCaller<void(const IntImportCallback&), GameExport> GameExportCaller;
 
 
 void Game_constructPreferences( PreferencesPage& page ){
@@ -414,17 +414,17 @@ bool DoLightIntensityDlg( int *intensity ){
 		return true;
 
 	QDialog dialog( MainFrame_getWindow(), Qt::Dialog | Qt::WindowCloseButtonHint );
-	dialog.setWindowTitle( "Light intensity" );
+	dialog.setWindowTitle( "Set Light intensity" );
 
 	auto spin = new SpinBox( -99999, 99999, *intensity );
 
-	auto check = new QCheckBox( "Don't Show" );
+	auto check = new QCheckBox( "Don't show this dialog until restart" );
 	QObject::connect( check, &QCheckBox::toggled, []( bool checked ){ g_dontDoLightIntensityDlg = checked; } );
 
 	{
 		auto form = new QFormLayout( &dialog );
 		form->setSizeConstraint( QLayout::SizeConstraint::SetFixedSize );
-		form->addRow( new QLabel( "ESC for default, ENTER to validate" ) );
+		form->addRow( new QLabel( "Tip: ESC for default, ENTER to validate" ) );
 		form->addRow( new SpinBoxLabel( "Intensity:", spin ), spin );
 		form->addWidget( check );
 
@@ -655,7 +655,7 @@ QCompleter inactive entry in list // because is wrapAround()
 
 static const struct{ const char *name; const char *text; } c_shaderTemplates[] = {
 	{
-		"map",
+		"%map",
 R"(
 	{
 		map $lightmap
@@ -670,7 +670,7 @@ R"(
 )"
 	},
 	{
-		"map-vertex",
+		"%map-vertex",
 R"(
 	surfaceparm nolightmap
 	{
@@ -681,7 +681,7 @@ R"(
 )"
 	},
 	{
-		"mask",
+		"%mask",
 R"(
 	cull none
 	{
@@ -705,7 +705,7 @@ R"(
 )"
 	},
 	{
-		"mask-vertex",
+		"%mask-vertex",
 R"(
 	surfaceparm nolightmap
 	cull none
@@ -719,7 +719,7 @@ R"(
 )"
 	},
 	{
-		"blend",
+		"%blend",
 R"(
 	cull none
 	{
@@ -735,13 +735,29 @@ R"(
 )"
 	},
 	{
-		"remap",
+		"%remap",
 R"(
 	// compile time parameter
 	surfaceparm slick
 	qer_editorimage textures/
 	// remap back to original shader
 	q3map_remapShader textures/
+}
+)"
+	},
+	{
+		"%skybox",
+R"(
+	qer_editorImage env/
+	surfaceparm noimpact
+	surfaceparm nolightmap
+	surfaceparm sky
+	q3map_sunExt 1 1 1 85 -43 60 2 16
+	q3map_LightMapFilterRadius 0 8
+	q3map_skylight 70 4
+	nopicmip
+	// path without _bk.tga suffix
+	skyparms env/
 }
 )"
 	},
@@ -918,13 +934,13 @@ static const std::vector<ShaderFormat> g_shaderGeneralFormats{
 		}
 	},
 	{
-		"qer_editorImage %t", "quake-editor-radiant-directives.html#editorImage", c_colorKeyLv1
+		"qer_editorImage %t", c_pageQER, c_colorKeyLv1
 	},
 	{
-		"qer_trans %f", "quake-editor-radiant-directives.html#trans", c_colorKeyLv1
+		"qer_trans %f", c_pageQER, c_colorKeyLv1
 	},
 	{
-		"qer_alphaFunc %s %f", "quake-editor-radiant-directives.html#alphaFunc", c_colorKeyLv1, {
+		"qer_alphaFunc %s %f", c_pageQER, c_colorKeyLv1, {
 			"equal",
 			"greater",
 			"less",
@@ -1238,7 +1254,6 @@ static const std::vector<ShaderFormat> g_shaderStageFormats{
 			"oneMinusEntity",
 			"vertex",
 			"oneMinusVertex",
-			"portal",
 		}
 	},
 	{
@@ -1248,11 +1263,13 @@ static const std::vector<ShaderFormat> g_shaderStageFormats{
 			"square",
 			"sawtooth",
 			"inversesawtooth",
-			"noise",
 		}
 	},
 	{
-		"alphaGen const %f", c_pageStage, c_colorKeyLv2
+		"alphaGen %s %f", c_pageStage, c_colorKeyLv2, {
+			"const",
+			"portal",
+		}
 	},
 	{
 		"tcGen %s", c_pageStage, c_colorKeyLv2, {
@@ -1583,7 +1600,7 @@ class QLineEdit_search : public QLineEdit
 	QPlainTextEdit& m_textEdit;
 public:
 	QLineEdit_search( QPlainTextEdit& textEdit ) : m_textEdit( textEdit ){
-		setPlaceholderText( QString::fromUtf8( u8"🔍" ) );
+		setPlaceholderText( QString::fromUtf8( "🔍" ) );
 		QObject::connect( this, &QLineEdit::textEdited, [this]( const QString &text ){
 			// when typing, we do not want jumping to next occurence on each letter input, set cursor to selection start
 			if( auto cursor = m_textEdit.textCursor(); cursor.hasSelection() ){
@@ -1663,10 +1680,10 @@ public:
 			return string_compare_nocase_n( texTree.m_name.c_str(), prefix.prefix, strlen( prefix.prefix ) ) > 0;
 		}
 		bool operator()( const TexTree& texTree, const StringRange range ) const {
-			return string_compare_nocase_n( texTree.m_name.c_str(), range.begin(), range.size() ) < 0;
+			return string_compare_nocase_n( texTree.m_name.c_str(), range.data(), range.size() ) < 0;
 		}
 		bool operator()( const StringRange range, const TexTree& texTree ) const {
-			return string_compare_nocase_n( texTree.m_name.c_str(), range.begin(), range.size() ) > 0;
+			return string_compare_nocase_n( texTree.m_name.c_str(), range.data(), range.size() ) > 0;
 		}
 	};
 
@@ -1710,7 +1727,7 @@ public:
 class LineNumberArea : public QWidget
 {
 	QPlainTextEdit *m_textEdit;
-	const Callback1<QPaintEvent*> m_paintCallback;
+	const Callback<void(QPaintEvent*)> m_paintCallback;
 public:
 	LineNumberArea( QPlainTextEdit *textEdit, const decltype( m_paintCallback )& paintCallback ) :
 		QWidget( textEdit ), m_textEdit( textEdit ), m_paintCallback( paintCallback ){}
@@ -1720,7 +1737,7 @@ public:
 	}
 	int lineNumberAreaWidth() const {
 		const int digits = 1 + std::log10( std::max( 1, m_textEdit->blockCount() ) );
-		return 3 + 10 + m_textEdit->fontMetrics().horizontalAdvance( QLatin1Char('9') ) * digits;
+		return 3 + 10 + m_textEdit->fontMetrics().horizontalAdvance( QLatin1Char( '9' ) ) * digits;
 	}
 	void updateLineNumberArea( const QRect &rect, int dy ){
 		if( dy )
@@ -1754,7 +1771,7 @@ public:
 		updateTabStopDistance();
 		new ShaderHighlighter( document() );
 
-		m_lineNumberArea = new LineNumberArea( this, MemberCaller1<QPlainTextEdit_Shader, QPaintEvent *, &QPlainTextEdit_Shader::lineNumberAreaPaintEvent>( *this ) );
+		m_lineNumberArea = new LineNumberArea( this, MemberCaller<QPlainTextEdit_Shader, void(QPaintEvent *), &QPlainTextEdit_Shader::lineNumberAreaPaintEvent>( *this ) );
 		QObject::connect( this, &QPlainTextEdit::blockCountChanged, [this]( int newBlockCount ){ updateLineNumberAreaWidth(); } );
 		QObject::connect( this, &QPlainTextEdit::updateRequest, [this]( const QRect &rect, int dy ){
 			m_lineNumberArea->updateLineNumberArea( rect, dy );
@@ -1958,7 +1975,7 @@ protected:
 			updateTabStopDistance();
 			return;
 		}
-		QPlainTextEdit::wheelEvent(e);
+		QPlainTextEdit::wheelEvent( e );
 	}
 	void paintEvent( QPaintEvent* pEvent ) override {
 		static QRect rect;
@@ -2009,7 +2026,7 @@ private:
 			void insert( const char *name ) const {
 				m_texTree.insert( m_stringStream( m_dirstring, PathExtensionless( name ) ) );
 			}
-			typedef ConstMemberCaller1<LoadTexturesByTypeVisitor, const char*, &LoadTexturesByTypeVisitor::insert> InsertCaller;
+			typedef ConstMemberCaller<LoadTexturesByTypeVisitor, void(const char*), &LoadTexturesByTypeVisitor::insert> InsertCaller;
 			LoadTexturesByTypeVisitor( const char* dirstring, TexTree& texTree ) :
 				m_dirstring( dirstring ), m_texTree( texTree ), m_stringStream( 64 )
 			{}
@@ -2239,7 +2256,7 @@ class TextEditor : public QObject
 
 	void construct(){
 		m_window = new QWidget( MainFrame_getWindow(), Qt::Dialog | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint );
-		g_guiSettings.addWindow( m_window, "ShaderEditor/geometry" );
+		g_guiSettings.addWindow( m_window, "ShaderEditor/geometry", 550, 700 );
 		m_window->installEventFilter( this );
 
 		auto *vbox = new QVBoxLayout( m_window );

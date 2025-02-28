@@ -380,13 +380,9 @@ public:
 		: m_brushlist( brushlist ){
 	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
-		if ( path.top().get().visible() ) {
-			Brush* brush = Node_getBrush( path.top() );
-			if ( brush != 0
-			  && Instance_isSelected( instance ) ) {
+		if ( path.top().get().visible() && Instance_isSelected( instance ) )
+			if ( Brush* brush = Node_getBrush( path.top() ) )
 				m_brushlist.push_back( brush );
-			}
-		}
 		return true;
 	}
 };
@@ -414,41 +410,28 @@ void post( const scene::Path& path, scene::Instance& instance ) const {
 class BrushDeleteSelected : public scene::Graph::Walker
 {
 	scene::Node* m_keepNode;
-	mutable bool m_eraseParent;
+	scene::Node* m_world = Map_FindWorldspawn( g_map );
+	mutable bool m_eraseParent = false;
 public:
-	BrushDeleteSelected( scene::Node* keepNode ): m_keepNode( keepNode ), m_eraseParent( false ){
-	}
-	BrushDeleteSelected(): m_keepNode( NULL ), m_eraseParent( false ){
+	BrushDeleteSelected( scene::Node* keepNode = nullptr ): m_keepNode( keepNode ){
 	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		return true;
 	}
 	void post( const scene::Path& path, scene::Instance& instance ) const {
-		//globalOutputStream() << path.size() << '\n';
-		if ( path.top().get().visible() ) {
-			Brush* brush = Node_getBrush( path.top() );
-			if ( brush != 0
+		if ( Node_isBrush( path.top() ) ) {
+			if ( path.top().get().visible()
 			  && Instance_isSelected( instance )
-			  && path.size() > 1
 			  && path.top().get_pointer() != m_keepNode ) {
 				scene::Node& parent = path.parent();
 				Path_deleteTop( path );
-				if( Node_getTraversable( parent )->empty() ){
-					m_eraseParent = true;
-					//globalOutputStream() << "Empty node?!.\n";
-				}
-				return;
+				m_eraseParent = Node_getTraversable( parent )->empty();
 			}
 		}
-		if( m_eraseParent && !Node_isPrimitive( path.top() ) && path.size() > 1 ){
-			//globalOutputStream() << "about to Delete empty node!.\n";
+		else if( m_eraseParent ){
 			m_eraseParent = false;
-			Entity* entity = Node_getEntity( path.top() );
-			if ( entity != 0 && path.top().get_pointer() != Map_FindWorldspawn( g_map )
-			  && Node_getTraversable( path.top() )->empty() && path.top().get_pointer() != m_keepNode ) {
-				//globalOutputStream() << "now Deleting empty node!.\n";
+			if ( path.top().get_pointer() != m_world && path.top().get_pointer() != m_keepNode )
 				Path_deleteTop( path );
-			}
 		}
 	}
 };
@@ -473,11 +456,9 @@ class Dereference
 {
 	const Functor& functor;
 public:
-	typedef typename RemoveReference<typename Functor::first_argument_type>::type* first_argument_type;
-	typedef typename Functor::result_type result_type;
 	Dereference( const Functor& functor ) : functor( functor ){
 	}
-	result_type operator()( first_argument_type firstArgument ) const {
+	get_result_type<Functor> operator()( typename RemoveReference<get_argument<Functor, 0>>::type *firstArgument ) const {
 		return functor( *firstArgument );
 	}
 };
@@ -499,15 +480,13 @@ Face* Brush_findIf( const Brush& brush, const Predicate& predicate ){
 template<typename Caller>
 class BindArguments1
 {
-	typedef typename Caller::second_argument_type FirstBound;
+	typedef get_argument<Caller, 1> FirstBound;
 	FirstBound firstBound;
 public:
-	typedef typename Caller::result_type result_type;
-	typedef typename Caller::first_argument_type first_argument_type;
 	BindArguments1( FirstBound firstBound )
 		: firstBound( firstBound ){
 	}
-	result_type operator()( first_argument_type firstArgument ) const {
+	get_result_type<Caller> operator()( get_argument<Caller, 0> firstArgument ) const {
 		return Caller::call( firstArgument, firstBound );
 	}
 };
@@ -515,17 +494,15 @@ public:
 template<typename Caller>
 class BindArguments2
 {
-	typedef typename Caller::second_argument_type FirstBound;
-	typedef typename Caller::third_argument_type SecondBound;
+	typedef get_argument<Caller, 1> FirstBound;
+	typedef get_argument<Caller, 2> SecondBound;
 	FirstBound firstBound;
 	SecondBound secondBound;
 public:
-	typedef typename Caller::result_type result_type;
-	typedef typename Caller::first_argument_type first_argument_type;
 	BindArguments2( FirstBound firstBound, SecondBound secondBound )
 		: firstBound( firstBound ), secondBound( secondBound ){
 	}
-	result_type operator()( first_argument_type firstArgument ) const {
+	get_result_type<Caller> operator()( get_argument<Caller, 0> firstArgument ) const {
 		return Caller::call( firstArgument, firstBound, secondBound );
 	}
 };
@@ -538,7 +515,7 @@ BindArguments2<Caller> bindArguments( const Caller& caller, FirstBound firstBoun
 inline bool Face_testPlane( const Face& face, const Plane3& plane, bool flipped ){
 	return face.contributes() && !Winding_TestPlane( face.getWinding(), plane, flipped );
 }
-typedef Function3<const Face&, const Plane3&, bool, bool, Face_testPlane> FaceTestPlane;
+typedef Function<bool(const Face&, const Plane3&, bool), Face_testPlane> FaceTestPlane;
 
 
 
@@ -572,32 +549,27 @@ brushsplit_t Brush_classifyPlane( const Brush& brush, const Plane3& plane ){
 	return split;
 }
 
-bool Brush_subtract( const Brush& brush, const Brush& other, brush_vector_t& ret_fragments ){
+bool Brush_subtract( const Brush& brush, const Brush& other, const std::vector<const Face *>& otherfaces, brush_vector_t& ret_fragments ){
 	if ( aabb_intersects_aabb( brush.localAABB(), other.localAABB() ) ) {
 		brush_vector_t fragments;
 		fragments.reserve( other.size() );
 		Brush back( brush );
 
-		for ( Brush::const_iterator i( other.begin() ); i != other.end(); ++i )
+		for ( const Face* face : otherfaces )
 		{
-			if ( ( *i )->contributes() ) {
-				brushsplit_t split = Brush_classifyPlane( back, ( *i )->plane3() );
-				if ( split.counts[ePlaneFront] != 0
-				  && split.counts[ePlaneBack] != 0 ) {
-					fragments.push_back( new Brush( back ) );
-					Face* newFace = fragments.back()->addFace( *( *i ) );
-					if ( newFace != 0 ) {
-						newFace->flipWinding();
-					}
-					back.addFace( *( *i ) );
+			brushsplit_t split = Brush_classifyPlane( back, face->plane3() );
+			if ( split.counts[ePlaneFront] != 0
+			  && split.counts[ePlaneBack] != 0 ) {
+				fragments.push_back( new Brush( back ) );
+				if ( Face* newFace = fragments.back()->addFace( *face ) ) {
+					newFace->flipWinding();
 				}
-				else if ( split.counts[ePlaneBack] == 0 ) {
-					for ( brush_vector_t::iterator i = fragments.begin(); i != fragments.end(); ++i )
-					{
-						delete( *i );
-					}
-					return false;
-				}
+				back.addFace( *face );
+			}
+			else if ( split.counts[ePlaneBack] == 0 ) {
+				for ( Brush* frag : fragments )
+					delete( frag );
+				return false;
 			}
 		}
 		ret_fragments.insert( ret_fragments.end(), fragments.begin(), fragments.end() );
@@ -609,48 +581,103 @@ bool Brush_subtract( const Brush& brush, const Brush& other, brush_vector_t& ret
 class SubtractBrushesFromUnselected : public scene::Graph::Walker
 {
 	const brush_vector_t& m_brushlist;
+	std::vector<std::vector<const Face *>> m_brushfaces; // m_brushfaces.size() == m_brushlist.size()
 	std::size_t& m_before;
 	std::size_t& m_after;
-	mutable bool m_eraseParent;
+	mutable bool m_eraseParent = false;
+	scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
 	SubtractBrushesFromUnselected( const brush_vector_t& brushlist, std::size_t& before, std::size_t& after )
-		: m_brushlist( brushlist ), m_before( before ), m_after( after ), m_eraseParent( false ){
-	}
-	bool pre( const scene::Path& path, scene::Instance& instance ) const {
-		if ( path.top().get().visible() ) {
-			return true;
-		}
-		return false;
-	}
-	void post( const scene::Path& path, scene::Instance& instance ) const {
-		if ( path.top().get().visible() ) {
-			Brush* brush = Node_getBrush( path.top() );
-			if ( brush != 0
-			  && !Instance_isSelected( instance ) ) {
-				brush_vector_t buffer[2];
-				bool swap = false;
-				Brush* original = new Brush( *brush );
-				buffer[static_cast<std::size_t>( swap )].push_back( original );
+		: m_brushlist( brushlist ), m_before( before ), m_after( after )
+	{
+		std::vector<ProjectionAxis> doneProjections;
+		doneProjections.reserve( 3 );
+		m_brushfaces.reserve( m_brushlist.size() );
+		for( const Brush* brush : m_brushlist )
+		{
+			doneProjections.clear();
+			auto& faces = m_brushfaces.emplace_back();
+			faces.reserve( brush->size() );
+			for( const Face* face : *brush )
+				if( face->contributes() )
+					faces.push_back( face );
 
-				{
-					for ( brush_vector_t::const_iterator i( m_brushlist.begin() ); i != m_brushlist.end(); ++i )
-					{
-						for ( brush_vector_t::iterator j( buffer[static_cast<std::size_t>( swap )].begin() ); j != buffer[static_cast<std::size_t>( swap )].end(); ++j )
-						{
-							if ( Brush_subtract( *( *j ), *( *i ), buffer[static_cast<std::size_t>( !swap )] ) ) {
-								delete ( *j );
-							}
-							else
-							{
-								buffer[static_cast<std::size_t>( !swap )].push_back( ( *j ) );
-							}
-						}
-						buffer[static_cast<std::size_t>( swap )].clear();
-						swap = !swap;
+			std::ranges::sort( faces, []( const Face* a, const Face* b ){
+				const DoubleVector3& n1 = a->getPlane().plane3().normal();
+				const DoubleVector3& n2 = b->getPlane().plane3().normal();
+				const ProjectionAxis p1 = projectionaxis_for_normal( n1 );
+				const ProjectionAxis p2 = projectionaxis_for_normal( n2 );
+				return float_equal_epsilon( fabs( n1[ p1 ] ), fabs( n2[ p2 ] ), c_PLANE_NORMAL_EPSILON )
+				? p1 > p2 // Z > Y > X
+				: fabs( n1[ p1 ] ) > fabs( n2[ p2 ] ); // or most axial
+			} );
+
+			auto it = faces.cbegin(), found = it; // traverse projections and craft more fortunate splits order in non trivial cases
+			while( ( found = std::ranges::find_if( faces, [&doneProjections]( const Face* face ){
+				return std::ranges::find( doneProjections, projectionaxis_for_normal( face->getPlane().plane3().normal() ) ) == doneProjections.cend();
+			} ) ) != faces.cend() ){
+				auto moveit = [&]( decltype( it ) move ){ // moves face forward to prioritize
+					const Face* face = *move;
+					faces.erase( move );
+					faces.insert( it++, face ); // postincrement: 'it' ends up right after the insertion
+				};
+				moveit( found );
+				const DoubleVector3& n1 = ( *( it - 1 ) )->getPlane().plane3().normal();
+				const ProjectionAxis p1 = projectionaxis_for_normal( n1 );
+				doneProjections.push_back( p1 );
+				// find opposite face
+				auto more = faces.cend();
+				double bestmax = 0;
+				double bestdot = 1;
+				for( auto face = it; face != faces.cend(); ++face ){
+					const DoubleVector3& n2 = ( *face )->getPlane().plane3().normal();
+					const ProjectionAxis p2 = projectionaxis_for_normal( n2 );
+					if( p1 == p2 // same projection
+					&& n1[p1] * n2[p2] < 0 // opposite projection facing
+					&& ( fabs( n2[p2] ) > bestmax + c_PLANE_NORMAL_EPSILON // definitely better proj direction
+					   || ( fabs( n2[p2] ) > bestmax - c_PLANE_NORMAL_EPSILON // or similar proj direction
+					     && vector3_dot( n1, n2 ) < bestdot ) ) ){ // + more opposing normal direction
+						bestmax = fabs( n2[p2] );
+						bestdot = vector3_dot( n1, n2 );
+						more = face;
 					}
 				}
+				if( more != faces.end() ){
+					moveit( more );
+				}
+			}
+		}
+	}
+	bool pre( const scene::Path& path, scene::Instance& instance ) const {
+		return path.top().get().visible();
+	}
+	void post( const scene::Path& path, scene::Instance& instance ) const {
+		if ( Brush* thebrush = Node_getBrush( path.top() ) ) {
+			if ( path.top().get().visible() && !Instance_isSelected( instance )
+			&& std::any_of( m_brushlist.cbegin(), m_brushlist.cend(),
+			[thebrush]( const Brush *b ){ return aabb_intersects_aabb( thebrush->localAABB(), b->localAABB() ); } ) ) {
+				brush_vector_t buffer[2];
+				bool swap = false;
+				Brush* original = new Brush( *thebrush );
+				buffer[swap].push_back( original );
 
-				brush_vector_t& out = buffer[static_cast<std::size_t>( swap )];
+				for ( size_t i = 0; i < m_brushlist.size(); ++i )
+				{
+					for ( Brush *brush : buffer[swap] )
+					{
+						if ( Brush_subtract( *brush, *m_brushlist[i], m_brushfaces[i], buffer[!swap] ) ) {
+							delete brush;
+						}
+						else
+						{
+							buffer[!swap].push_back( brush );
+						}
+					}
+					buffer[swap].clear();
+					swap = !swap;
+				}
+
+				brush_vector_t& out = buffer[swap];
 
 				if ( out.size() == 1 && out.back() == original ) {
 					delete original;
@@ -658,35 +685,30 @@ public:
 				else
 				{
 					++m_before;
-					for ( brush_vector_t::const_iterator i = out.begin(); i != out.end(); ++i )
+					for ( Brush *brush : out )
 					{
 						++m_after;
-						( *i )->removeEmptyFaces();
-						if ( !( *i )->empty() ) {
+						brush->removeEmptyFaces();
+						if ( !brush->empty() ) {
 							NodeSmartReference node( ( new BrushNode() )->node() );
-							Node_getBrush( node )->copy( *( *i ) );
-							delete ( *i );
+							Node_getBrush( node )->copy( *brush );
+							delete brush;
 							Node_getTraversable( path.parent() )->insert( node );
 						}
 						else{
-							delete ( *i );
+							delete brush;
 						}
 					}
 					scene::Node& parent = path.parent();
 					Path_deleteTop( path );
-					if( Node_getTraversable( parent )->empty() ){
-						m_eraseParent = true;
-					}
+					m_eraseParent = Node_getTraversable( parent )->empty();
 				}
 			}
 		}
-		if( m_eraseParent && !Node_isPrimitive( path.top() ) && path.size() > 1 ){
+		else if( m_eraseParent ){
 			m_eraseParent = false;
-			Entity* entity = Node_getEntity( path.top() );
-			if ( entity != 0 && path.top().get_pointer() != Map_FindWorldspawn( g_map )
-			  && Node_getTraversable( path.top() )->empty() ) {
+			if ( path.top().get_pointer() != m_world )
 				Path_deleteTop( path );
-			}
 		}
 	}
 };
@@ -709,8 +731,8 @@ void CSG_Subtract(){
 		std::size_t after = 0;
 		GlobalSceneGraph().traverse( SubtractBrushesFromUnselected( selected_brushes, before, after ) );
 		globalOutputStream() << "CSG Subtract: Result: "
-		                     << after << " fragment" << ( after == 1 ? "" : "s" )
-		                     << " from " << before << " brush" << ( before == 1 ? "" : "es" ) << ".\n";
+		                     << after << ( after == 1 ? " fragment" : " fragments" )
+		                     << " from " << before << ( before == 1 ? " brush.\n" : " brushes.\n" );
 
 		SceneChangeNotify();
 	}
@@ -1592,10 +1614,10 @@ void CSG_Tool(){
 #include "commands.h"
 
 void CSG_registerCommands(){
-	GlobalCommands_insert( "CSGSubtract", FreeCaller<CSG_Subtract>(), QKeySequence( "Shift+U" ) );
-	GlobalCommands_insert( "CSGMerge", FreeCaller<CSG_Merge>() );
-	GlobalCommands_insert( "CSGWrapMerge", FreeCaller<CSG_WrapMerge>(), QKeySequence( "Ctrl+U" ) );
-	GlobalCommands_insert( "CSGIntersect", FreeCaller<CSG_Intersect>(), QKeySequence( "Ctrl+Shift+U" ) );
-	GlobalCommands_insert( "CSGroom", FreeCaller<CSG_MakeRoom>() );
-	GlobalCommands_insert( "CSGTool", FreeCaller<CSG_Tool>() );
+	GlobalCommands_insert( "CSGSubtract", makeCallbackF( CSG_Subtract ), QKeySequence( "Shift+U" ) );
+	GlobalCommands_insert( "CSGMerge", makeCallbackF( CSG_Merge ) );
+	GlobalCommands_insert( "CSGWrapMerge", FreeCaller<void(), CSG_WrapMerge>(), QKeySequence( "Ctrl+U" ) );
+	GlobalCommands_insert( "CSGIntersect", makeCallbackF( CSG_Intersect ), QKeySequence( "Ctrl+Shift+U" ) );
+	GlobalCommands_insert( "CSGroom", makeCallbackF( CSG_MakeRoom ) );
+	GlobalCommands_insert( "CSGTool", makeCallbackF( CSG_Tool ) );
 }

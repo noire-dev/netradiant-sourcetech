@@ -67,6 +67,7 @@
 #include "bitflags.h"
 #include <list>
 #include <forward_list>
+#include <algorithm>
 #include "qmath.h"
 
 #include <cstddef>
@@ -301,6 +302,9 @@ struct bspDrawVert_t
 	Vector3 normal;
 	Color4b color[ MAX_LIGHTMAPS ];             /* RBSP */
 };
+
+using TriRef = std::array<const bspDrawVert_t *, 3>;
+using QuadRef = std::array<const bspDrawVert_t *, 4>;
 
 
 enum bspSurfaceType_t
@@ -1381,7 +1385,7 @@ inline float Random(){ /* returns a pseudorandom number between 0 and 1 */
 }
 
 /* help.c */
-void                        HelpMain(const char* arg);
+void                        HelpMain( const char* arg );
 void                        HelpGames();
 
 /* path_init.c */
@@ -1433,7 +1437,7 @@ bool                        WindingIsTiny( const winding_t& w );
 
 
 /* mesh.c */
-void                        LerpDrawVert( const bspDrawVert_t *a, const bspDrawVert_t *b, bspDrawVert_t *out );
+bspDrawVert_t               LerpDrawVert( const bspDrawVert_t& a, const bspDrawVert_t& b );
 void                        LerpDrawVertAmount( bspDrawVert_t *a, bspDrawVert_t *b, float amount, bspDrawVert_t *out );
 void                        FreeMesh( mesh_t *m );
 mesh_t                      *CopyMesh( mesh_t *mesh );
@@ -1662,17 +1666,21 @@ void                        TCMod( const tcMod_t& mod, Vector2& st );
 bool                        ApplySurfaceParm( const char *name, int *contentFlags, int *surfaceFlags, int *compileFlags );
 const surfaceParm_t         *GetSurfaceParm( const char *name );
 
-// Encode the string as a type
-template <char... chars>
-using TemplateString = std::integer_sequence<char, chars...>;
-// Create a user defined literal operator
-template <typename T, T... chars>
-constexpr TemplateString<chars...> operator""_Tstring() { return { }; }
+// Encode the string as a structural literal class type
+template <std::size_t N>
+struct TemplateString
+{
+	consteval TemplateString( const char(&string)[N] ) {
+		std::copy_n( string, N, m_data );
+		ENSURE( string[N - 1] == '\0' && "TemplateString must be null-terminated" ); // consteval ensures this is evaluated at compile time, despite not being a static_assert
+	}
+	char m_data[N];
+};
+
 /// \brief returns statically evaluated \c surfaceParm_t for the given name or emits \c Error
-template<char... chars>
-const surfaceParm_t         &GetRequiredSurfaceParm( const TemplateString<chars...> ){
-    static constexpr char str[sizeof...(chars) + 1] = { chars..., '\0' }; // Recover the character data
-	static const surfaceParm_t *const sp = GetSurfaceParm( str );
+template<TemplateString string>
+const surfaceParm_t         &GetRequiredSurfaceParm(){
+	static const surfaceParm_t *const sp = GetSurfaceParm( string.m_data ); // null-termination ensured in constructor
 	ENSURE( sp != nullptr );
     return *sp;
 }

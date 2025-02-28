@@ -5,8 +5,6 @@
 #include "math/plane.h"
 
 
-#define VectorCopy( a,b ) ( ( b )[0] = ( a )[0],( b )[1] = ( a )[1],( b )[2] = ( a )[2] )
-
 #define RGBTOGRAY( x ) ( (float)( ( x )[0] ) * 0.2989f + (float)( ( x )[1] ) * 0.5870f + (float)( ( x )[2] ) * 0.1140f )
 
 #define VectorFastNormalize VectorNormalize
@@ -81,7 +79,7 @@ struct MinMax___
 		return other.maxs.x() >= mins.x() && other.maxs.y() >= mins.y() && other.maxs.z() >= mins.z()
 		    && other.mins.x() <= maxs.x() && other.mins.y() <= maxs.y() && other.mins.z() <= maxs.z();
 	}
-	// true, if other is completely enclosed by this
+	// true, if other is completely enclosed by this //! implicitly requires this->valid() or zero volume
 	template<typename U>
 	bool surrounds( const MinMax___<U>& other ) const {
 		return other.mins.x() >= mins.x() && other.mins.y() >= mins.y() && other.mins.z() >= mins.z()
@@ -210,7 +208,7 @@ bool PlaneFromPoints( Plane3___<P>& plane, const BasicVector3<V> planepts[3] ) {
    computes the base texture axis for brush primitive texturing
    note: ComputeAxisBase here and in editor code must always BE THE SAME!
    warning: special case behaviour of atan2( y, x ) <-> atan( y / x ) might not be the same everywhere when x == 0
-   rotation by (0,RotY,RotZ) assigns X to normal
+   rotation by ( 0, RotY, RotZ ) assigns X to normal
  */
 
 template <typename Element, typename OtherElement>
@@ -219,11 +217,11 @@ inline void ComputeAxisBase( const BasicVector3<Element>& normal, BasicVector3<O
 	const BasicVector3<Element> up( 0, 0, 1 );
 	const BasicVector3<Element> down( 0, 0, -1 );
 
-	if ( vector3_equal_epsilon( normal, up, Element(1e-6) ) ) {
+	if ( vector3_equal_epsilon( normal, up, Element( 1e-6 ) ) ) {
 		texS = BasicVector3<OtherElement>( 0, 1, 0 );
 		texT = BasicVector3<OtherElement>( 1, 0, 0 );
 	}
-	else if ( vector3_equal_epsilon( normal, down, Element(1e-6) ) ) {
+	else if ( vector3_equal_epsilon( normal, down, Element( 1e-6 ) ) ) {
 		texS = BasicVector3<OtherElement>( 0, 1, 0 );
 		texT = BasicVector3<OtherElement>( -1, 0, 0 );
 	}

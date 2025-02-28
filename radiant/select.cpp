@@ -241,9 +241,8 @@ public:
 			m_removedChild = false;
 
 			// delete empty entities
-			Entity* entity = Node_getEntity( path.top() );
-			if ( entity != 0
-			     && path.top().get_pointer() != Map_FindWorldspawn( g_map )
+			if ( Node_isEntity( path.top() )
+			     && path.top().get_pointer() != Map_FindWorldspawn( g_map ) // direct worldspawn deletion is permitted, so do find it each time
 			     && Node_getTraversable( path.top() )->empty() ) {
 				Path_deleteTop( path );
 			}
@@ -334,11 +333,9 @@ void Select_Invert(){
 //interesting printings
 class ExpandSelectionToEntitiesWalker_dbg : public scene::Graph::Walker
 {
-	mutable std::size_t m_depth;
-	const scene::Node* m_world;
+	mutable std::size_t m_depth = 0;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
-	ExpandSelectionToEntitiesWalker_dbg() : m_depth( 0 ), m_world( Map_FindWorldspawn( g_map ) ){
-	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		++m_depth;
 		globalOutputStream() << "pre depth_" << m_depth;
@@ -385,11 +382,9 @@ public:
 
 class ExpandSelectionToPrimitivesWalker : public scene::Graph::Walker
 {
-	mutable std::size_t m_depth;
-	const scene::Node* m_world;
+	mutable std::size_t m_depth = 0;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
-	ExpandSelectionToPrimitivesWalker() : m_depth( 0 ), m_world( Map_FindWorldspawn( g_map ) ){
-	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		++m_depth;
 
@@ -426,11 +421,9 @@ void Scene_ExpandSelectionToPrimitives(){
 
 class ExpandSelectionToEntitiesWalker : public scene::Graph::Walker
 {
-	mutable std::size_t m_depth;
-	const scene::Node* m_world;
+	mutable std::size_t m_depth = 0;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
-	ExpandSelectionToEntitiesWalker() : m_depth( 0 ), m_world( Map_FindWorldspawn( g_map ) ){
-	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		++m_depth;
 
@@ -474,7 +467,7 @@ void Selection_UpdateWorkzone(){
 		Select_GetBounds( g_select_workzone.d_work_min, g_select_workzone.d_work_max );
 	}
 }
-typedef FreeCaller<Selection_UpdateWorkzone> SelectionUpdateWorkzoneCaller;
+typedef FreeCaller<void(), Selection_UpdateWorkzone> SelectionUpdateWorkzoneCaller;
 
 IdleDraw g_idleWorkzone = IdleDraw( SelectionUpdateWorkzoneCaller() );
 }
@@ -731,10 +724,9 @@ template<typename EntityMatcher>
 class EntityFindByPropertyValueWalker : public scene::Graph::Walker
 {
 	const EntityMatcher& m_entityMatcher;
-	const scene::Node* m_world;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
-	EntityFindByPropertyValueWalker( const EntityMatcher& entityMatcher )
-		: m_entityMatcher( entityMatcher ), m_world( Map_FindWorldspawn( g_map ) ){
+	EntityFindByPropertyValueWalker( const EntityMatcher& entityMatcher ) : m_entityMatcher( entityMatcher ){
 	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		if( !path.top().get().visible() ){
@@ -777,14 +769,13 @@ class EntityGetSelectedPropertyValuesWalker : public scene::Graph::Walker
 {
 	PropertyValues& m_propertyvalues;
 	const char *m_prop;
-	const scene::Node* m_world;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
 	EntityGetSelectedPropertyValuesWalker( const char *prop, PropertyValues& propertyvalues )
-		: m_propertyvalues( propertyvalues ), m_prop( prop ), m_world( Map_FindWorldspawn( g_map ) ){
+		: m_propertyvalues( propertyvalues ), m_prop( prop ){
 	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
-		Entity* entity = Node_getEntity( path.top() );
-		if ( entity != 0 ){
+		if ( Entity* entity = Node_getEntity( path.top() ) ){
 			if( path.top().get_pointer() != m_world ){
 				if ( Instance_isSelected( instance ) || instance.childSelected() ) {
 					if ( !propertyvalues_contain( m_propertyvalues, entity->getKeyValue( m_prop ) ) ) {
@@ -1036,7 +1027,7 @@ void Selection_Flipz(){
 
 void Selection_Rotatex(){
 	UndoableCommand undo( "rotateSelected -axis x -angle -90" );
-	Select_RotateAxis( 0,-90 );
+	Select_RotateAxis( 0, -90 );
 }
 
 void Selection_Rotatey(){
@@ -1046,7 +1037,7 @@ void Selection_Rotatey(){
 
 void Selection_Rotatez(){
 	UndoableCommand undo( "rotateSelected -axis z -angle -90" );
-	Select_RotateAxis( 2,-90 );
+	Select_RotateAxis( 2, -90 );
 }
 #include "xywindow.h"
 void Selection_FlipHorizontally(){
@@ -1235,10 +1226,10 @@ void MoveToCamera(){
 class CloneSelected : public scene::Graph::Walker
 {
 	const bool m_makeUnique;
-	const scene::Node* m_world;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
 	mutable std::vector<scene::Node*> m_cloned;
-	CloneSelected( bool makeUnique ) : m_makeUnique( makeUnique ), m_world( Map_FindWorldspawn( g_map ) ){
+	CloneSelected( bool makeUnique ) : m_makeUnique( makeUnique ){
 	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		if ( path.size() == 1 ) {
@@ -1385,8 +1376,8 @@ void Selection_Clone(){
 		Scene_Clone_Selected( GlobalSceneGraph(), false );
 
 		if( g_bNudgeAfterClone ){
-			NudgeSelection(eNudgeRight, GetGridSize(), GlobalXYWnd_getCurrentViewType());
-			NudgeSelection(eNudgeDown, GetGridSize(), GlobalXYWnd_getCurrentViewType());
+			NudgeSelection( eNudgeRight, GetGridSize(), GlobalXYWnd_getCurrentViewType() );
+			NudgeSelection( eNudgeDown, GetGridSize(), GlobalXYWnd_getCurrentViewType() );
 		}
 	}
 }
@@ -1398,8 +1389,8 @@ void Selection_Clone_MakeUnique(){
 		Scene_Clone_Selected( GlobalSceneGraph(), true );
 
 		if( g_bNudgeAfterClone ){
-			NudgeSelection(eNudgeRight, GetGridSize(), GlobalXYWnd_getCurrentViewType());
-			NudgeSelection(eNudgeDown, GetGridSize(), GlobalXYWnd_getCurrentViewType());
+			NudgeSelection( eNudgeRight, GetGridSize(), GlobalXYWnd_getCurrentViewType() );
+			NudgeSelection( eNudgeDown, GetGridSize(), GlobalXYWnd_getCurrentViewType() );
 		}
 	}
 }
@@ -1430,10 +1421,6 @@ void Selection_Deselect(){
 
 void Scene_Clone_Selected(){
 	Scene_Clone_Selected( GlobalSceneGraph(), false );
-}
-
-void RepeatTransforms(){
-	GlobalSelectionSystem().repeatTransforms( FreeCaller<Scene_Clone_Selected>() );
 }
 
 
@@ -1489,11 +1476,11 @@ void Texdef_ScaleDown(){
 }
 
 void Texdef_ScaleLeft(){
-	Texdef_Scale( -g_si_globals.scale[0],0 );
+	Texdef_Scale( -g_si_globals.scale[0], 0 );
 }
 
 void Texdef_ScaleRight(){
-	Texdef_Scale( g_si_globals.scale[0],0 );
+	Texdef_Scale( g_si_globals.scale[0], 0 );
 }
 
 void Texdef_Shift( float x, float y ){
@@ -1775,10 +1762,10 @@ class EntityGetSelectedPropertyValuesWalker_nonEmpty : public scene::Graph::Walk
 {
 	PropertyValues& m_propertyvalues;
 	const char *m_prop;
-	const scene::Node* m_world;
+	const scene::Node* m_world = Map_FindWorldspawn( g_map );
 public:
 	EntityGetSelectedPropertyValuesWalker_nonEmpty( const char *prop, PropertyValues& propertyvalues )
-		: m_propertyvalues( propertyvalues ), m_prop( prop ), m_world( Map_FindWorldspawn( g_map ) ){
+		: m_propertyvalues( propertyvalues ), m_prop( prop ){
 	}
 	bool pre( const scene::Path& path, scene::Instance& instance ) const {
 		Entity* entity = Node_getEntity( path.top() );
@@ -1848,71 +1835,72 @@ void SelectConnectedEntities(){
 
 
 void Select_registerCommands(){
-	GlobalCommands_insert( "ShowHidden", FreeCaller<Select_ShowAllHidden>(), QKeySequence( "Shift+H" ) );
-	GlobalToggles_insert( "HideSelected", FreeCaller<HideSelected>(), ToggleItem::AddCallbackCaller( g_hidden_item ), QKeySequence( "H" ) );
+	GlobalCommands_insert( "ShowHidden", makeCallbackF( Select_ShowAllHidden ), QKeySequence( "Shift+H" ) );
+	GlobalToggles_insert( "HideSelected", makeCallbackF( HideSelected ), ToggleItem::AddCallbackCaller( g_hidden_item ), QKeySequence( "H" ) );
 
-	GlobalCommands_insert( "MirrorSelectionX", FreeCaller<Selection_Flipx>() );
-	GlobalCommands_insert( "RotateSelectionX", FreeCaller<Selection_Rotatex>() );
-	GlobalCommands_insert( "MirrorSelectionY", FreeCaller<Selection_Flipy>() );
-	GlobalCommands_insert( "RotateSelectionY", FreeCaller<Selection_Rotatey>() );
-	GlobalCommands_insert( "MirrorSelectionZ", FreeCaller<Selection_Flipz>() );
-	GlobalCommands_insert( "RotateSelectionZ", FreeCaller<Selection_Rotatez>() );
+	GlobalCommands_insert( "MirrorSelectionX", makeCallbackF( Selection_Flipx ) );
+	GlobalCommands_insert( "RotateSelectionX", makeCallbackF( Selection_Rotatex ) );
+	GlobalCommands_insert( "MirrorSelectionY", makeCallbackF( Selection_Flipy ) );
+	GlobalCommands_insert( "RotateSelectionY", makeCallbackF( Selection_Rotatey ) );
+	GlobalCommands_insert( "MirrorSelectionZ", makeCallbackF( Selection_Flipz ) );
+	GlobalCommands_insert( "RotateSelectionZ", makeCallbackF( Selection_Rotatez ) );
 
-	GlobalCommands_insert( "MirrorSelectionHorizontally", FreeCaller<Selection_FlipHorizontally>() );
-	GlobalCommands_insert( "MirrorSelectionVertically", FreeCaller<Selection_FlipVertically>() );
+	GlobalCommands_insert( "MirrorSelectionHorizontally", makeCallbackF( Selection_FlipHorizontally ) );
+	GlobalCommands_insert( "MirrorSelectionVertically", makeCallbackF( Selection_FlipVertically ) );
 
-	GlobalCommands_insert( "RotateSelectionClockwise", FreeCaller<Selection_RotateClockwise>() );
-	GlobalCommands_insert( "RotateSelectionAnticlockwise", FreeCaller<Selection_RotateAnticlockwise>() );
+	GlobalCommands_insert( "RotateSelectionClockwise", makeCallbackF( Selection_RotateClockwise ) );
+	GlobalCommands_insert( "RotateSelectionAnticlockwise", makeCallbackF( Selection_RotateAnticlockwise ) );
 
-	GlobalCommands_insert( "SelectTextured", FreeCaller<Select_FacesAndPatchesByShader>(), QKeySequence( "Ctrl+Shift+A" ) );
+	GlobalCommands_insert( "SelectTextured", makeCallbackF( Select_FacesAndPatchesByShader ), QKeySequence( "Ctrl+Shift+A" ) );
 
-	GlobalCommands_insert( "Undo", FreeCaller<Undo>(), QKeySequence( "Ctrl+Z" ) );
-	GlobalCommands_insert( "Redo", FreeCaller<Redo>(), QKeySequence( "Ctrl+Shift+Z" ) );
-	GlobalCommands_insert( "Redo2", FreeCaller<Redo>(), QKeySequence( "Ctrl+Y" ) );
-	GlobalCommands_insert( "Copy", FreeCaller<Copy>(), QKeySequence( "Ctrl+C" ) );
-	GlobalCommands_insert( "Paste", FreeCaller<Paste>(), QKeySequence( "Ctrl+V" ) );
-	GlobalCommands_insert( "PasteToCamera", FreeCaller<PasteToCamera>(), QKeySequence( "Shift+V" ) );
-	GlobalCommands_insert( "MoveToCamera", FreeCaller<MoveToCamera>(), QKeySequence( "Ctrl+Shift+V" ) );
-	GlobalCommands_insert( "CloneSelection", FreeCaller<Selection_Clone>(), QKeySequence( "Space" ) );
-	GlobalCommands_insert( "CloneSelectionAndMakeUnique", FreeCaller<Selection_Clone_MakeUnique>(), QKeySequence( "Shift+Space" ) );
-	GlobalCommands_insert( "DeleteSelection2", FreeCaller<deleteSelection>(), QKeySequence( "Backspace" ) );
-	GlobalCommands_insert( "DeleteSelection", FreeCaller<deleteSelection>(), QKeySequence( "Z" ) );
-	GlobalCommands_insert( "RepeatTransforms", FreeCaller<RepeatTransforms>(), QKeySequence( "Ctrl+R" ) );
-//	GlobalCommands_insert( "ParentSelection", FreeCaller<Scene_parentSelected>() );
-	GlobalCommands_insert( "UnSelectSelection2", FreeCaller<Selection_Deselect>(), QKeySequence( "Escape" ) );
-	GlobalCommands_insert( "UnSelectSelection", FreeCaller<Selection_Deselect>(), QKeySequence( "C" ) );
-	GlobalCommands_insert( "InvertSelection", FreeCaller<Select_Invert>(), QKeySequence( "I" ) );
-	GlobalCommands_insert( "SelectInside", FreeCaller<Select_Inside>() );
-	GlobalCommands_insert( "SelectTouching", FreeCaller<Select_Touching>() );
-	GlobalCommands_insert( "ExpandSelectionToPrimitives", FreeCaller<Scene_ExpandSelectionToPrimitives>(), QKeySequence( "Ctrl+E" ) );
-	GlobalCommands_insert( "ExpandSelectionToEntities", FreeCaller<Scene_ExpandSelectionToEntities>(), QKeySequence( "Shift+E" ) );
-	GlobalCommands_insert( "SelectConnectedEntities", FreeCaller<SelectConnectedEntities>(), QKeySequence( "Ctrl+Shift+E" ) );
+	GlobalCommands_insert( "Undo", makeCallbackF( Undo ), QKeySequence( "Ctrl+Z" ) );
+	GlobalCommands_insert( "Redo", makeCallbackF( Redo ), QKeySequence( "Ctrl+Shift+Z" ) );
+	GlobalCommands_insert( "Redo2", makeCallbackF( Redo ), QKeySequence( "Ctrl+Y" ) );
+	GlobalCommands_insert( "Copy", makeCallbackF( Copy ), QKeySequence( "Ctrl+C" ) );
+	GlobalCommands_insert( "Paste", makeCallbackF( Paste ), QKeySequence( "Ctrl+V" ) );
+	GlobalCommands_insert( "PasteToCamera", makeCallbackF( PasteToCamera ), QKeySequence( "Shift+V" ) );
+	GlobalCommands_insert( "MoveToCamera", makeCallbackF( MoveToCamera ), QKeySequence( "Ctrl+Shift+V" ) );
+	GlobalCommands_insert( "CloneSelection", makeCallbackF( Selection_Clone ), QKeySequence( "Space" ) );
+	GlobalCommands_insert( "CloneSelectionAndMakeUnique", makeCallbackF( Selection_Clone_MakeUnique ), QKeySequence( "Shift+Space" ) );
+	GlobalCommands_insert( "DeleteSelection2", makeCallbackF( deleteSelection ), QKeySequence( "Backspace" ) );
+	GlobalCommands_insert( "DeleteSelection", makeCallbackF( deleteSelection ), QKeySequence( "Z" ) );
+	GlobalCommands_insert( "RepeatTransforms", makeCallbackF( +[](){ GlobalSelectionSystem().repeatTransforms(); } ), QKeySequence( "Ctrl+R" ) );
+	GlobalCommands_insert( "ResetTransforms", makeCallbackF( +[](){ GlobalSelectionSystem().resetTransforms(); } ), QKeySequence( "Alt+R" ) );
+//	GlobalCommands_insert( "ParentSelection", makeCallbackF( Scene_parentSelected ) );
+	GlobalCommands_insert( "UnSelectSelection2", makeCallbackF( Selection_Deselect ), QKeySequence( "Escape" ) );
+	GlobalCommands_insert( "UnSelectSelection", makeCallbackF( Selection_Deselect ), QKeySequence( "C" ) );
+	GlobalCommands_insert( "InvertSelection", makeCallbackF( Select_Invert ), QKeySequence( "I" ) );
+	GlobalCommands_insert( "SelectInside", makeCallbackF( Select_Inside ) );
+	GlobalCommands_insert( "SelectTouching", makeCallbackF( Select_Touching ) );
+	GlobalCommands_insert( "ExpandSelectionToPrimitives", makeCallbackF( Scene_ExpandSelectionToPrimitives ), QKeySequence( "Ctrl+E" ) );
+	GlobalCommands_insert( "ExpandSelectionToEntities", makeCallbackF( Scene_ExpandSelectionToEntities ), QKeySequence( "Shift+E" ) );
+	GlobalCommands_insert( "SelectConnectedEntities", makeCallbackF( SelectConnectedEntities ), QKeySequence( "Ctrl+Shift+E" ) );
 
-	GlobalCommands_insert( "ArbitraryRotation", FreeCaller<DoRotateDlg>(), QKeySequence( "Shift+R" ) );
-	GlobalCommands_insert( "ArbitraryScale", FreeCaller<DoScaleDlg>(), QKeySequence( "Ctrl+Shift+S" ) );
+	GlobalCommands_insert( "ArbitraryRotation", makeCallbackF( DoRotateDlg ), QKeySequence( "Shift+R" ) );
+	GlobalCommands_insert( "ArbitraryScale", makeCallbackF( DoScaleDlg ), QKeySequence( "Ctrl+Shift+S" ) );
 
-	GlobalCommands_insert( "SnapToGrid", FreeCaller<Selection_SnapToGrid>(), QKeySequence( "Ctrl+G" ) );
+	GlobalCommands_insert( "SnapToGrid", makeCallbackF( Selection_SnapToGrid ), QKeySequence( "Ctrl+G" ) );
 
-	GlobalCommands_insert( "SelectAllOfType", FreeCaller<Select_AllOfType>(), QKeySequence( "Shift+A" ) );
+	GlobalCommands_insert( "SelectAllOfType", makeCallbackF( Select_AllOfType ), QKeySequence( "Shift+A" ) );
 
-	GlobalCommands_insert( "TexRotateClock", FreeCaller<Texdef_RotateClockwise>(), QKeySequence( "Shift+PgDown" ) );
-	GlobalCommands_insert( "TexRotateCounter", FreeCaller<Texdef_RotateAntiClockwise>(), QKeySequence( "Shift+PgUp" ) );
-	GlobalCommands_insert( "TexScaleUp", FreeCaller<Texdef_ScaleUp>(), QKeySequence( "Ctrl+Up" ) );
-	GlobalCommands_insert( "TexScaleDown", FreeCaller<Texdef_ScaleDown>(), QKeySequence( "Ctrl+Down" ) );
-	GlobalCommands_insert( "TexScaleLeft", FreeCaller<Texdef_ScaleLeft>(), QKeySequence( "Ctrl+Left" ) );
-	GlobalCommands_insert( "TexScaleRight", FreeCaller<Texdef_ScaleRight>(), QKeySequence( "Ctrl+Right" ) );
-	GlobalCommands_insert( "TexShiftUp", FreeCaller<Texdef_ShiftUp>(), QKeySequence( "Shift+Up" ) );
-	GlobalCommands_insert( "TexShiftDown", FreeCaller<Texdef_ShiftDown>(), QKeySequence( "Shift+Down" ) );
-	GlobalCommands_insert( "TexShiftLeft", FreeCaller<Texdef_ShiftLeft>(), QKeySequence( "Shift+Left" ) );
-	GlobalCommands_insert( "TexShiftRight", FreeCaller<Texdef_ShiftRight>(), QKeySequence( "Shift+Right" ) );
+	GlobalCommands_insert( "TexRotateClock", makeCallbackF( Texdef_RotateClockwise ), QKeySequence( "Shift+PgDown" ) );
+	GlobalCommands_insert( "TexRotateCounter", makeCallbackF( Texdef_RotateAntiClockwise ), QKeySequence( "Shift+PgUp" ) );
+	GlobalCommands_insert( "TexScaleUp", makeCallbackF( Texdef_ScaleUp ), QKeySequence( "Ctrl+Up" ) );
+	GlobalCommands_insert( "TexScaleDown", makeCallbackF( Texdef_ScaleDown ), QKeySequence( "Ctrl+Down" ) );
+	GlobalCommands_insert( "TexScaleLeft", makeCallbackF( Texdef_ScaleLeft ), QKeySequence( "Ctrl+Left" ) );
+	GlobalCommands_insert( "TexScaleRight", makeCallbackF( Texdef_ScaleRight ), QKeySequence( "Ctrl+Right" ) );
+	GlobalCommands_insert( "TexShiftUp", makeCallbackF( Texdef_ShiftUp ), QKeySequence( "Shift+Up" ) );
+	GlobalCommands_insert( "TexShiftDown", makeCallbackF( Texdef_ShiftDown ), QKeySequence( "Shift+Down" ) );
+	GlobalCommands_insert( "TexShiftLeft", makeCallbackF( Texdef_ShiftLeft ), QKeySequence( "Shift+Left" ) );
+	GlobalCommands_insert( "TexShiftRight", makeCallbackF( Texdef_ShiftRight ), QKeySequence( "Shift+Right" ) );
 
-	GlobalCommands_insert( "MoveSelectionDOWN", FreeCaller<Selection_MoveDown>(), QKeySequence( Qt::Key_Minus + Qt::KeypadModifier ) );
-	GlobalCommands_insert( "MoveSelectionUP", FreeCaller<Selection_MoveUp>(), QKeySequence( Qt::Key_Plus + Qt::KeypadModifier ) );
+	GlobalCommands_insert( "MoveSelectionDOWN", makeCallbackF( Selection_MoveDown ), QKeySequence( Qt::Key_Minus + Qt::KeypadModifier ) );
+	GlobalCommands_insert( "MoveSelectionUP", makeCallbackF( Selection_MoveUp ), QKeySequence( Qt::Key_Plus + Qt::KeypadModifier ) );
 
-	GlobalCommands_insert( "SelectNudgeLeft", FreeCaller<Selection_NudgeLeft>(), QKeySequence( "Alt+Left" ) );
-	GlobalCommands_insert( "SelectNudgeRight", FreeCaller<Selection_NudgeRight>(), QKeySequence( "Alt+Right" ) );
-	GlobalCommands_insert( "SelectNudgeUp", FreeCaller<Selection_NudgeUp>(), QKeySequence( "Alt+Up" ) );
-	GlobalCommands_insert( "SelectNudgeDown", FreeCaller<Selection_NudgeDown>(), QKeySequence( "Alt+Down" ) );
+	GlobalCommands_insert( "SelectNudgeLeft", makeCallbackF( Selection_NudgeLeft ), QKeySequence( "Alt+Left" ) );
+	GlobalCommands_insert( "SelectNudgeRight", makeCallbackF( Selection_NudgeRight ), QKeySequence( "Alt+Right" ) );
+	GlobalCommands_insert( "SelectNudgeUp", makeCallbackF( Selection_NudgeUp ), QKeySequence( "Alt+Up" ) );
+	GlobalCommands_insert( "SelectNudgeDown", makeCallbackF( Selection_NudgeDown ), QKeySequence( "Alt+Down" ) );
 }
 
 
@@ -1932,11 +1920,11 @@ void Nudge_constructPreferences( PreferencesPage& page ){
 void Selection_construct(){
 	GlobalPreferenceSystem().registerPreference( "NudgeAfterClone", BoolImportStringCaller( g_bNudgeAfterClone ), BoolExportStringCaller( g_bNudgeAfterClone ) );
 
-	PreferencesDialog_addSettingsPreferences( FreeCaller1<PreferencesPage&, Nudge_constructPreferences>() );
+	PreferencesDialog_addSettingsPreferences( makeCallbackF( Nudge_constructPreferences ) );
 
-	GlobalSelectionSystem().addSelectionChangeCallback( FreeCaller1<const Selectable&, SceneSelectionChange>() );
-	GlobalSelectionSystem().addSelectionChangeCallback( FreeCaller1<const Selectable&, UpdateWorkzone_ForSelectionChanged>() );
-	Selection_boundsChanged = GlobalSceneGraph().addBoundsChangedCallback( FreeCaller<UpdateWorkzone_ForSelection>() );
+	GlobalSelectionSystem().addSelectionChangeCallback( FreeCaller<void(const Selectable&), SceneSelectionChange>() );
+	GlobalSelectionSystem().addSelectionChangeCallback( FreeCaller<void(const Selectable&), UpdateWorkzone_ForSelectionChanged>() );
+	Selection_boundsChanged = GlobalSceneGraph().addBoundsChangedCallback( FreeCaller<void(), UpdateWorkzone_ForSelection>() );
 }
 
 void Selection_destroy(){
