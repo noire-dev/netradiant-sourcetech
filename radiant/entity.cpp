@@ -185,10 +185,6 @@ void Entity_ungroup(){
 	Scene_EntitySetClassname_Selected( "worldspawn" );
 }
 
-void Entity_group(){
-	Entity_createFromSelection( "func_group", g_vector3_identity );
-}
-
 #if 0
 void Entity_ungroupSelected(){
 	if ( GlobalSelectionSystem().countSelected() < 1 ) {
@@ -714,7 +710,6 @@ void Entity_constructMenu( QMenu* menu ){
 void Entity_registerShortcuts(){
 	command_connect_accelerator( "EntityMovePrimitivesToFirst" );
 	command_connect_accelerator( "EntityUngroup" );
-	command_connect_accelerator( "EntityGroup" );
 	command_connect_accelerator( "EntityUngroupPrimitives" );
 }
 
@@ -732,7 +727,6 @@ void Entity_Construct(){
 	GlobalCommands_insert( "EntityMovePrimitivesToLast", makeCallbackF( Entity_moveSelectedPrimitivesToLast ), QKeySequence( "Ctrl+M" ) );
 	GlobalCommands_insert( "EntityMovePrimitivesToFirst", makeCallbackF( Entity_moveSelectedPrimitivesToFirst ) );
 	GlobalCommands_insert( "EntityUngroup", makeCallbackF( Entity_ungroup ) );
-	//GlobalCommands_insert( "EntityGroup", FreeCaller<Entity_group>(), QKeySequence( "G" ) );
 	GlobalCommands_insert( "EntityUngroupPrimitives", makeCallbackF( Entity_ungroupSelectedPrimitives ) );
 
 	GlobalToggles_insert( "ShowLightRadiuses", makeCallbackF( ToggleShowLightRadii ), ToggleItem::AddCallbackCaller( g_show_lightradii_item ) );
