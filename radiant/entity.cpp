@@ -732,7 +732,7 @@ void Entity_Construct(){
 	GlobalCommands_insert( "EntityMovePrimitivesToLast", makeCallbackF( Entity_moveSelectedPrimitivesToLast ), QKeySequence( "Ctrl+M" ) );
 	GlobalCommands_insert( "EntityMovePrimitivesToFirst", makeCallbackF( Entity_moveSelectedPrimitivesToFirst ) );
 	GlobalCommands_insert( "EntityUngroup", makeCallbackF( Entity_ungroup ) );
-	GlobalCommands_insert( "EntityGroup", FreeCaller<Entity_group>(), QKeySequence( "G" ) );
+	//GlobalCommands_insert( "EntityGroup", FreeCaller<Entity_group>(), QKeySequence( "G" ) );
 	GlobalCommands_insert( "EntityUngroupPrimitives", makeCallbackF( Entity_ungroupSelectedPrimitives ) );
 
 	GlobalToggles_insert( "ShowLightRadiuses", makeCallbackF( ToggleShowLightRadii ), ToggleItem::AddCallbackCaller( g_show_lightradii_item ) );
